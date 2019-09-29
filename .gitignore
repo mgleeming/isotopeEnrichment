@@ -1,0 +1,8 @@
+*.mzML
+*.dat
+*.swp
+*.swo
+*.sw?
+*~
+/data
+/figs
