@@ -2,7 +2,7 @@
 
 The isotopeEnrichment.py script determines the abundances of infividual peptide isotopes in liquid chraomatography-mass spectrometry data. The resulting data can be used to determine the extent of heavy isotope incorporation into a target molecule in isotope tracer experiments.
 
-# Usage
+# Isage
 
 isotopeEnrichment.py requires three different input files to run:
 
