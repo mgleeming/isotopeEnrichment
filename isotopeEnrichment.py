@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 DEFAULT_ISOTOPE_COUNTER = 6
 DEFAULT_EXTRACTION_WIDTH = 0.01
-DEFAULT_EXTRACTION_LENGTH = 1
+DEFAULT_EXTRACTION_LENGTH = 2
 DEFAULT_ISOTOPE_WEIGHT = 1
 DEFAULT_SPECTRA_TO_AVERAGE = 2
 DEFAULT_OUT_DIR_NAME = 'results'
@@ -185,7 +185,7 @@ def getPeptides(target_protein_ids, options):
 
     peptides.sort(key = lambda x: x.TIC, reverse = True)
 
-    return peptides[0:200]
+    return peptides
 
 def getEICData(peptides, outPath, options):
 #    base = os.path.basename(options.mzmlFile)
