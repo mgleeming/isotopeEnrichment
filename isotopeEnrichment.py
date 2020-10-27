@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 DEFAULT_ISOTOPE_COUNTER = 6
 DEFAULT_EXTRACTION_WIDTH = 0.01
-DEFAULT_EXTRACTION_LENGTH = 2
+DEFAULT_EXTRACTION_LENGTH = 0.5
 DEFAULT_ISOTOPE_WEIGHT = 1
 DEFAULT_SPECTRA_TO_AVERAGE = 2
 DEFAULT_OUT_DIR_NAME = 'results'
@@ -55,26 +55,48 @@ parser.add_argument('--avgNSpectra',
                     )
 parser.add_argument('--eicWidth',
                     default = DEFAULT_EXTRACTION_WIDTH,
-                    type = int,
+                    type = float,
                     help = 'width (in m/z) used to produce EIC plots'
                     )
 parser.add_argument('--eicLength',
                     default = DEFAULT_EXTRACTION_LENGTH,
-                    type = int,
+                    type = float,
                     help = 'Time range (in min) surrounding a target to produce EIC plots'
                     )
 parser.add_argument('--isotopeWeight',
                     default = DEFAULT_ISOTOPE_WEIGHT,
-                    type = int,
+                    type = float,
                     help = 'mass increment of isotope of interest'
                     )
-parser.add_argument('--noPlot',
+parser.add_argument('--processTopN',
+                    type = int,
+                    help = 'Process only the top N most abundant target peptides (measured by MS1 precursor intensity).'
+                    )
+parser.add_argument('--plot',
                     action = 'store_true',
-                    help = "Don't draw peptide EIC and isotope intensity graphics"
+                    help = 'Draw peptide EIC and isotope intensity graphics. This is very time consuming if the number of target peptides is large.'
+                    )
+parser.add_argument('--plotTopN',
+                    type = int,
+                    help = 'Draw peptide EIC and isotope intensity graphics for only the top N most abundant target peptides (measured by MS1 precursor intensity). Only active if the --plot flag is given'
                     )
 parser.add_argument('--outDirName',
                     help = 'Results directory name',
                     default = DEFAULT_OUT_DIR_NAME
+                    )
+parser.add_argument('--profile',
+                    action = 'store_true',
+                    help = 'Calculate peak fitting statistics and produce summary plots',
+                    )
+parser.add_argument('--fwhmLim',
+                    type = float,
+                    help = 'If specified, peptides with a FWHM greater than this value will be ignored.'
+                    )
+
+parser.add_argument('--specialResidue',
+                    action = 'append',
+                    type = str,
+                    help = 'Creates a column in the output tables containing the total number of occurrences of the specified residue. To specify multiple residues, include multiple argument/value pairs. For example "--specialResidue S --specialResidue G" will create a column with the number of Gly and Ser residues'
                     )
 
 class Peptide(object):
@@ -86,17 +108,27 @@ class Peptide(object):
                 'rts' : [], 'ints' : [], 'mzs' : [], 'mzInts' : []
             }
 
+        if pd.isna(row['Precursor apex offset time']):
+            offset = 0
+        else:
+            offset = float(row['Precursor apex offset time'])
+        self.rt = float(row['Retention time']) + offset
+        self.trigger_rt = float(row['Retention time'])
+
         self.TIC = float(row['Total ion current'])
         self.mz = float(row['m/z'])
-        self.rt = float(row['Retention time'])
         self.z = int(row['Charge'])
         self.mods = row['Modifications']
         self.mod_seq = row['Modified sequence']
-        self.sequence = row['Sequence']
+        self.sequence = row['Sequence'].upper()
         self.proteinGroup = row['Proteins']
 
+#        print('')
+#        print(self.rt)
+#        print(self.trigger_rt)
         self.getTargets(options)
         self.getFormula()
+        self.getSpecialResidueCount(options)
         return
 
     def appendQuantity(self, mzmlFile, attribute, quantity):
@@ -109,6 +141,17 @@ class Peptide(object):
 
     def getQuantity(self, mzmlFile, attribute):
         return self.peptideQuant[mzmlFile][attribute]
+
+    def getSpecialResidueCount(self, options):
+
+        if options.specialResidue:
+            self.specialResidueCount = sum(
+                [self.sequence.count(sr.upper()) for sr in options.specialResidue]
+            )
+        else:
+            self.specialResidueCount = 0
+
+        return
 
     def getTargets(self, options):
         self.targets = []
@@ -151,10 +194,9 @@ def getPeptides(target_protein_ids, options):
 
     peptideIndes = {}
     counter = 0
-    for index, row in df.iterrows():
 
-        if counter % 100 == 0:
-            print(counter)
+    print('Processing peptide targets')
+    for index, row in df.iterrows():
 
         counter += 1
 
@@ -185,6 +227,14 @@ def getPeptides(target_protein_ids, options):
 
     peptides.sort(key = lambda x: x.TIC, reverse = True)
 
+    if options.processTopN:
+        try:
+            return peptides[0:options.processTopN+1]
+        except IndexError:
+            print('Warning - asked to analyse top %s peptides but only %s were found. Processing all...' %(
+                options.processTopN, len(peptides))
+            )
+
     return peptides
 
 def getEICData(peptides, outPath, options):
@@ -192,12 +242,12 @@ def getEICData(peptides, outPath, options):
 #    output = 'result_%s.dat' %base.split('.')[0]
     output = 'result.dat'
 
-    print('Processing %s peptide targets' %len(peptides))
+    print('Found %s peptide targets' %len(peptides))
 
     of1 = open(os.path.join(outPath, output),'wt')
 
     text = '\t'.join(
-        ['Sequence', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(options.clusterWidth)]
+        ['File', 'Sequence', 'Special Residue Count' 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(options.clusterWidth)]
     )
     of1.write('%s\n'%(text))
     for mzmlFile in options.mzmlFile:
@@ -265,7 +315,16 @@ def getEICData(peptides, outPath, options):
                 # optimal fit parameters not found
                 continue
 
+            # calcualte full width at half max
+            eicFWHM = 2*np.sqrt(2*np.log(2))*RTpopt[2] / 1
+
+            if options.fwhmLim:
+                if eicFWHM > options.fwhmLim:
+                    continue
+
+            # save fitting parameters
             p.setQuantity(mzmlFile, 'fits', [RTpopt, RTpcov])
+            p.setQuantity(mzmlFile, 'eicFWHM', eicFWHM)
 
             # use curve to create fitted gaussian intensities at given rts
             fit_ints = gauss(
@@ -297,11 +356,44 @@ def getEICData(peptides, outPath, options):
             p.setQuantity(mzmlFile, 'abundances', abundances)
 
             text = '\t'.join(
-                [str(x) for x in [mzmlFile, p.sequence, p.formula, p.mz, p.rt, p.z, p.mods, p.proteinGroup]] + [str(sum(x) / len(x)) for x in p.getQuantity(mzmlFile, 'abundances')]
+                [str(x) for x in [mzmlFile, p.specialResidueCount, p.sequence, p.formula, p.mz, p.rt, p.z, p.mods, p.proteinGroup]] + [str(sum(x) / len(x)) for x in p.getQuantity(mzmlFile, 'abundances')]
             )
             of1.write('%s\n'%(text))
 
     of1.close()
+    return
+
+def drawProfilePlots(peptides, outPath, options):
+
+    figDir = 'profile'
+
+    path = os.path.join(outPath, figDir)
+    try:
+        os.makedirs(path)
+    except:
+        pass
+
+    plotxlim = 3
+    vals = []
+    for mzmlFile in options.mzmlFile:
+        for p in peptides:
+            try:
+                v = abs(p.getQuantity(mzmlFile, 'eicFWHM'))
+                if v > plotxlim:
+                    v = plotxlim
+                vals.append(v)
+            except:
+                pass
+
+    fig, ax = plt.subplots()
+
+    ax.hist(vals, density=False, bins=100, range=(0,plotxlim))
+    ax.set_ylabel('Counts')
+    ax.set_xlabel('EIC FWHM');
+
+    fig.tight_layout()
+    fig.savefig( os.path.join(path, 'FWHM_Histogram.png'))
+
     return
 
 def drawPlots(peptides, outPath, options):
@@ -314,48 +406,72 @@ def drawPlots(peptides, outPath, options):
     except:
         pass
 
-    for p in peptides:
+    for ip, p in enumerate(peptides):
+
+        if options.plotTopN and ip > options.plotTopN:
+            break
 
         fig, axs = plt.subplots(len(options.mzmlFile), 2)
 
         for axi, mzmlFile in enumerate(options.mzmlFile):
 
+            if len(options.mzmlFile) == 1:
+                ax = axs
+            else:
+                ax = axs[axi]
+#            try:
+#                name = str(p.getQuantity(mzmlFile, 'eicFWHM'))
+#            except:
+#                name = 'None'
             name = os.path.basename(mzmlFile)
             try:
                 f = p.getQuantity(mzmlFile, 'fits')[0]
             except KeyError:
                 continue
 
-            axs[axi,0].set_title( name )
-            axs[axi,0].set_ylabel('Abundance')
-            axs[axi,0].set_xlim((
+            # chromatograms
+            ax[0].set_title( name )
+            ax[0].set_ylabel('Abundance')
+            ax[0].set_xlim((
                 min(p.getQuantity(mzmlFile, 'rts')),
                 max(p.getQuantity(mzmlFile, 'rts'))
             ))
-            axs[axi,0].plot(
+            ax[0].plot(
                 p.getQuantity(mzmlFile, 'rts'),
                 p.getQuantity(mzmlFile, 'ints')
             )
 
-            axs[axi,0].plot(
+            ax[0].plot(
                 p.getQuantity(mzmlFile, 'rts'),
                 gauss(p.getQuantity(mzmlFile, 'rts'), *p.getQuantity(mzmlFile, 'fits')[0])
             )
-            axs[axi,0].set_yticklabels([])
+            ax[0].set_yticklabels([])
 
+            # plot chromatogram boundary lines
+
+            HWHM = p.getQuantity(mzmlFile, 'eicFWHM')/2
+            lbound = p.getQuantity(mzmlFile, 'maxrt') - HWHM
+            rbound = p.getQuantity(mzmlFile, 'maxrt') + HWHM
+
+            ax[0].axvline(x = lbound, color = 'red', ls = 'dashed', lw = 0.73)
+            ax[0].axvline(x = rbound, color = 'red', ls = 'dashed', lw = 0.75)
+            ax[0].axvline(x = p.rt, color = 'blue', ls = 'dashed', lw = 0.75)
+            ax[0].axvline(x = p.trigger_rt, color = 'green', ls = 'dashed', lw = 0.75)
+
+            # isotope abundances
             x = list(range(len(p.getQuantity(mzmlFile, 'abundances'))))
-            axs[axi,1].set_title( name )
-            axs[axi,1].bar(
+            ax[1].set_title( name )
+            ax[1].bar(
                 x, [sum(x) for x in p.getQuantity(mzmlFile, 'abundances')] , align = 'center' , alpha = 0.5
             )
 
-            axs[axi,1].set_ylabel('Abundance')
-            axs[axi,1].set_yticklabels([])
+            ax[1].set_ylabel('Abundance')
+            ax[1].set_yticklabels([])
 
             if axi == len(options.mzmlFile) - 1:
+                ax[0].set_xlabel('Retention Time (min)')
+                ax[1].set_xlabel('Isotope')
 
-                axs[axi,0].set_xlabel('Retention Time (min)')
-                axs[axi,1].set_xlabel('Isotope')
         fig.tight_layout()
         plt.savefig( os.path.join(path, '%s_%s_rt_%s_mz_%s.png' %(len(p.sequence), p.sequence, p.rt, p.mz)))
         plt.clf()
@@ -375,7 +491,6 @@ def main(options):
 
     # get list of proteins containing '60S' string
     df = pd.read_csv(options.proteinGroupsFile, delimiter='\t')
-
 
     if options.searchTerm:
         if len(options.searchTerm) > 0:
@@ -404,11 +519,18 @@ def main(options):
         pg_proteins = pg.split(';')
         target_protein_ids.extend(pg_proteins)
 
-    peptides = getPeptides(target_protein_ids, options)
-    getEICData(peptides, outPath, options)
+    save = True
+    if save:
+        peptides = getPeptides(target_protein_ids, options)
+        getEICData(peptides, outPath, options)
+#        pickle.dump(peptides, open('peptides.p','wb'))
+#    else:
+#        peptides = pickle.load(open('peptides.p','rb'))
 
+    if options.profile:
+        drawProfilePlots(peptides, outPath, options)
 
-    if not options.noPlot:
+    if options.plot:
         drawPlots(peptides, outPath, options)
 
     return
