@@ -6,7 +6,7 @@ import scipy.optimize as opt
 import pyteomics.mass as pymass
 import matplotlib.pyplot as plt
 
-DEFAULT_ISOTOPE_COUNTER = 6
+DEFAULT_MIN_CLUSTER_WIDTH = 5
 DEFAULT_EXTRACTION_WIDTH = 0.01
 DEFAULT_EXTRACTION_LENGTH = 0.5
 DEFAULT_ISOTOPE_WEIGHT = 1
@@ -43,10 +43,19 @@ parser.add_argument('--msmsScansFile',
                     type = str,
                     help = 'File path of msmsScans.txt file produced by MaxQuant'
                     )
-parser.add_argument('--clusterWidth',
-                    default = DEFAULT_ISOTOPE_COUNTER,
+parser.add_argument('--minClusterWidth',
+                    default = DEFAULT_MIN_CLUSTER_WIDTH,
                     type = int,
                     help = 'Number of isotopologues to consider in the analysis'
+                    )
+parser.add_argument('--addSpecialResidues',
+                    action = 'store_true',
+                    help = 'For each peptide, add the count of residues specified by the --specialResidue flag to the target cluster width.'
+                    )
+parser.add_argument('--specialResidue',
+                    action = 'append',
+                    type = str,
+                    help = 'Creates a column in the output tables containing the total number of occurrences of the specified residue. To specify multiple residues, include multiple argument/value pairs. For example "--specialResidue S --specialResidue G" will create a column with the number of Gly and Ser residues'
                     )
 parser.add_argument('--avgNSpectra',
                     default = DEFAULT_SPECTRA_TO_AVERAGE,
@@ -93,12 +102,6 @@ parser.add_argument('--fwhmLim',
                     help = 'If specified, peptides with a FWHM greater than this value will be ignored.'
                     )
 
-parser.add_argument('--specialResidue',
-                    action = 'append',
-                    type = str,
-                    help = 'Creates a column in the output tables containing the total number of occurrences of the specified residue. To specify multiple residues, include multiple argument/value pairs. For example "--specialResidue S --specialResidue G" will create a column with the number of Gly and Ser residues'
-                    )
-
 class Peptide(object):
     def __init__(self, row, options):
 
@@ -123,12 +126,10 @@ class Peptide(object):
         self.sequence = row['Sequence'].upper()
         self.proteinGroup = row['Proteins']
 
-#        print('')
-#        print(self.rt)
-#        print(self.trigger_rt)
-        self.getTargets(options)
         self.getFormula()
         self.getSpecialResidueCount(options)
+
+        self.getTargets(options)
         return
 
     def appendQuantity(self, mzmlFile, attribute, quantity):
@@ -155,7 +156,13 @@ class Peptide(object):
 
     def getTargets(self, options):
         self.targets = []
-        for isotope in range(options.clusterWidth):
+
+        self.clusterWidth = options.minClusterWidth
+
+        if options.addSpecialResidues:
+            self.clusterWidth += self.specialResidueCount
+
+        for isotope in range(self.clusterWidth):
 
             # TODO
             # this lists targets as <ISOTOPE> above the ms precursor target
@@ -246,8 +253,11 @@ def getEICData(peptides, outPath, options):
 
     of1 = open(os.path.join(outPath, output),'wt')
 
+
+    maxClusterWidth = max( [p.clusterWidth for p in peptides] )
+
     text = '\t'.join(
-        ['File', 'Sequence', 'Special Residue Count', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(options.clusterWidth)]
+        ['File', 'Sequence', 'Special Residue Count', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(maxClusterWidth)]
     )
     of1.write('%s\n'%(text))
     for mzmlFile in options.mzmlFile:
@@ -419,10 +429,7 @@ def drawPlots(peptides, outPath, options):
                 ax = axs
             else:
                 ax = axs[axi]
-#            try:
-#                name = str(p.getQuantity(mzmlFile, 'eicFWHM'))
-#            except:
-#                name = 'None'
+
             name = os.path.basename(mzmlFile)
             try:
                 f = p.getQuantity(mzmlFile, 'fits')[0]
@@ -519,13 +526,8 @@ def main(options):
         pg_proteins = pg.split(';')
         target_protein_ids.extend(pg_proteins)
 
-    save = True
-    if save:
-        peptides = getPeptides(target_protein_ids, options)
-        getEICData(peptides, outPath, options)
-#        pickle.dump(peptides, open('peptides.p','wb'))
-#    else:
-#        peptides = pickle.load(open('peptides.p','rb'))
+    peptides = getPeptides(target_protein_ids, options)
+    getEICData(peptides, outPath, options)
 
     if options.profile:
         drawProfilePlots(peptides, outPath, options)
@@ -537,4 +539,5 @@ def main(options):
 
 if __name__ == '__main__':
     options =  parser.parse_args()
+
     main(options)

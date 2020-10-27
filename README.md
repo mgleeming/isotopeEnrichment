@@ -51,55 +51,72 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
 
 
 # IsotopeEnrichment help
-    isotopeEnrichment.py [-h] [--searchTerm SEARCHTERM] --mzmlFile MZMLFILE --proteinGroupsFile
-                                PROTEINGROUPSFILE --msmsScansFile MSMSSCANSFILE
-                                [--clusterWidth CLUSTERWIDTH] [--avgNSpectra AVGNSPECTRA]
-                                [--eicWidth EICWIDTH] [--eicLength EICLENGTH]
-                                [--isotopeWeight ISOTOPEWEIGHT] [--processTopN PROCESSTOPN] [--plot]
-                                [--plotTopN PLOTTOPN] [--outDirName OUTDIRNAME] [--profile]
-                                [--fwhmLim FWHMLIM] [--specialResidue SPECIALRESIDUE]
+    usage: isotopeEnrichment.py [-h] [--searchTerm SEARCHTERM] --mzmlFile MZMLFILE
+                                --proteinGroupsFile PROTEINGROUPSFILE
+                                --msmsScansFile MSMSSCANSFILE
+                                [--minClusterWidth MINCLUSTERWIDTH]
+                                [--addSpecialResidues]
+                                [--specialResidue SPECIALRESIDUE]
+                                [--avgNSpectra AVGNSPECTRA] [--eicWidth EICWIDTH]
+                                [--eicLength EICLENGTH]
+                                [--isotopeWeight ISOTOPEWEIGHT]
+                                [--processTopN PROCESSTOPN] [--plot]
+                                [--plotTopN PLOTTOPN] [--outDirName OUTDIRNAME]
+                                [--profile] [--fwhmLim FWHMLIM]
 
     Extract peptide isotope abundances from LCMS data
 
     optional arguments:
       -h, --help            show this help message and exit
       --searchTerm SEARCHTERM
-                            Text search terms used to filter proteins that are to be indcluded in the
-                            analysis. If omitted, all peptides will be included. To specify multiple
-                            search terms, include multiple argument/value pairs. For exmaple --searchTerm
-                            60S --searchTerm 40S --searchTerm 30S
-      --mzmlFile MZMLFILE   File path of mzML data files. To specify multiple mzML files, include
-                            multiple argument/value pairs. For example --mzmlFile sample1.mzML --mzmlFile
+                            Text search terms used to filter proteins that are to
+                            be indcluded in the analysis. If omitted, all peptides
+                            will be included. To specify multiple search terms,
+                            include multiple argument/value pairs. For exmaple
+                            --searchTerm 60S --searchTerm 40S --searchTerm 30S
+      --mzmlFile MZMLFILE   File path of mzML data files. To specify multiple mzML
+                            files, include multiple argument/value pairs. For
+                            example --mzmlFile sample1.mzML --mzmlFile
                             sample2.mzML --mzmlFile sample3.mzML
       --proteinGroupsFile PROTEINGROUPSFILE
-                            File path of proteinGroups.txt file produced by MaxQuant
+                            File path of proteinGroups.txt file produced by
+                            MaxQuant
       --msmsScansFile MSMSSCANSFILE
                             File path of msmsScans.txt file produced by MaxQuant
-      --clusterWidth CLUSTERWIDTH
+      --minClusterWidth MINCLUSTERWIDTH
                             Number of isotopologues to consider in the analysis
+      --addSpecialResidues  For each peptide, add the count of residues specified
+                            by the --specialResidue flag to the target cluster
+                            width.
+      --specialResidue SPECIALRESIDUE
+                            Creates a column in the output tables containing the
+                            total number of occurrences of the specified residue.
+                            To specify multiple residues, include multiple
+                            argument/value pairs. For example "--specialResidue S
+                            --specialResidue G" will create a column with the
+                            number of Gly and Ser residues
       --avgNSpectra AVGNSPECTRA
-                            Number of spectra either side of the EIC peak maximum to average when
-                            calculating isotope abundances
+                            Number of spectra either side of the EIC peak maximum
+                            to average when calculating isotope abundances
       --eicWidth EICWIDTH   width (in m/z) used to produce EIC plots
       --eicLength EICLENGTH
-                            Time range (in min) surrounding a target to produce EIC plots
+                            Time range (in min) surrounding a target to produce
+                            EIC plots
       --isotopeWeight ISOTOPEWEIGHT
                             mass increment of isotope of interest
       --processTopN PROCESSTOPN
-                            Process only the top N most abundant target peptides (measured by MS1
-                            precursor intensity).
-      --plot                Draw peptide EIC and isotope intensity graphics. This is very time consuming
-                            if the number of target peptides is large.
-      --plotTopN PLOTTOPN   Draw peptide EIC and isotope intensity graphics for only the top N most
-                            abundant target peptides (measured by MS1 precursor intensity). Only active
-                            if the --plot flag is given
+                            Process only the top N most abundant target peptides
+                            (measured by MS1 precursor intensity).
+      --plot                Draw peptide EIC and isotope intensity graphics. This
+                            is very time consuming if the number of target
+                            peptides is large.
+      --plotTopN PLOTTOPN   Draw peptide EIC and isotope intensity graphics for
+                            only the top N most abundant target peptides (measured
+                            by MS1 precursor intensity). Only active if the --plot
+                            flag is given
       --outDirName OUTDIRNAME
                             Results directory name
-      --profile             Calculate peak fitting statistics and produce summary plots
-      --fwhmLim FWHMLIM     If specified, peptides with a FWHM greater than this value will be ignored.
-      --specialResidue SPECIALRESIDUE
-                            Creates a column in the output tables containing the total number of
-                            occurrences of the specified residue. To specify multiple residues, include
-                            multiple argument/value pairs. For example "--specialResidue S
-                            --specialResidue G" will create a column with the number of Gly and Ser
-                            residues
+      --profile             Calculate peak fitting statistics and produce summary
+                            plots
+      --fwhmLim FWHMLIM     If specified, peptides with a FWHM greater than this
+                            value will be ignored
