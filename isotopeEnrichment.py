@@ -247,7 +247,7 @@ def getEICData(peptides, outPath, options):
     of1 = open(os.path.join(outPath, output),'wt')
 
     text = '\t'.join(
-        ['File', 'Sequence', 'Special Residue Count' 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(options.clusterWidth)]
+        ['File', 'Sequence', 'Special Residue Count', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(options.clusterWidth)]
     )
     of1.write('%s\n'%(text))
     for mzmlFile in options.mzmlFile:
@@ -356,7 +356,7 @@ def getEICData(peptides, outPath, options):
             p.setQuantity(mzmlFile, 'abundances', abundances)
 
             text = '\t'.join(
-                [str(x) for x in [mzmlFile, p.specialResidueCount, p.sequence, p.formula, p.mz, p.rt, p.z, p.mods, p.proteinGroup]] + [str(sum(x) / len(x)) for x in p.getQuantity(mzmlFile, 'abundances')]
+                [str(x) for x in [mzmlFile, p.sequence, p.specialResidueCount, p.formula, p.mz, p.rt, p.z, p.mods, p.proteinGroup]] + [str(sum(x) / len(x)) for x in p.getQuantity(mzmlFile, 'abundances')]
             )
             of1.write('%s\n'%(text))
 
