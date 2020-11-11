@@ -120,3 +120,33 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
                             plots
       --fwhmLim FWHMLIM     If specified, peptides with a FWHM greater than this
                             value will be ignored
+
+
+
+# enrichment calculations
+
+The isotopeEnrichment.R function arranges peptides into the required input files for natural isotopic abundance (NIA) correction and subsequent mean enrichment calculation. The caluclations are performed using the IsoCorrectoR R package:
+
+*Heinrich, P., Kohler, C., Ellmann, L., Kuerner, P., Spang, R., Oefner, P. J., and Dettmer, K. (2018). Correcting for natural isotope abundance and tracer impurity in MS-, MS/MS- and high-resolution-multiple-tracer-data from stable isotope labeling experiments with IsoCorrectoR. Sci. Rep. 8.*
+
+
+    ## preparing results files for correction
+
+    IsEnr <- isotopeEnrichment(PyResultsDir = "result.dat", returnCSV = T, verbose = T)
+    
+    ## performing NIA correction and mean enrichment calculation
+    
+    library(IsoCorrectoR)
+
+    Enrichment <- IsoCorrectoR::IsoCorrection(MeasurementFile = "MeasurementFile.csv",
+                                              ElementFile = "ElementFile.csv",
+                                              MoleculeFile = "MoleculeFile.csv",
+                                              CorrectTracerImpurity = T,
+                                              CorrectTracerElementCore = T,
+                                              CalculateMeanEnrichment = T,
+                                              UltraHighRes = F, 
+                                              FileOutFormat = "csv",
+                                              ReturnResultsObject = T,
+                                              CorrectAlsoMonoisotopic = T,
+                                              verbose = T)
+
