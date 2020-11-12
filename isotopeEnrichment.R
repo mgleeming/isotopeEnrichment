@@ -49,7 +49,14 @@ isotopeEnrichment <- function(PyResultsDir,
     
     colnames(out_mat) <- Treatments
     
+    IsoIDs <- c()
+    
+    count = 0
+    
     for (i in 1:dim(singlesingle_pep)[1]) {
+      
+      count = count + 1
+      #print(count)
       
       df_single_row <- na.omit(t(singlesingle_pep[i,10:dim(singlesingle_pep)[2]]))
       
@@ -64,6 +71,10 @@ isotopeEnrichment <- function(PyResultsDir,
                      as.character(rep("Z", dim(dim_test)[1])),
                      as.character(rep(unique(singlesingle_pep$Charge), dim(dim_test)[1])),
                      "_",
+                     as.character(rep(unique(round(singlesingle_pep$Retantion.Time..min.)), dim(dim_test)[1])),
+                     "_",
+                     as.character(rep(unique(round(singlesingle_pep$m.z)), dim(dim_test)[1])),
+                     "_",
                      apply(list2df(strsplit(rownames(df_single_row), "\\.")), 2, as.character)[2,])
     
     return_mat <- cbind("Measurements/Samples" = IsoIDs, out_mat)
@@ -76,9 +87,14 @@ isotopeEnrichment <- function(PyResultsDir,
   
   ###### First step must be subset the matrix to group of identical peptides in bins
   
-  peptides <- unique(data$Sequence)
+  peptides <- unique(paste0(data$Sequence,
+                            "_", data$Charge,
+                            "_", round(data$Retantion.Time..min.),
+                            "_", round(data$m.z)))
   
-  cat(paste0(length(peptides), "Peptides found"))
+  cat("...", "\n")
+  cat(paste0(length(peptides), " Peptides found"))
+  cat("...", "\n")
   
   MeasurementFile <- matrix(NA, nrow = 0, ncol = (TreatmentNo + 1))
   
@@ -86,15 +102,28 @@ isotopeEnrichment <- function(PyResultsDir,
   
   for (i in 1:length(peptides)) {
     
-    test_sequence <- length(strsplit(as.character(peptides[i]), "")[[1]])
+    test_sequence <- length(strsplit(as.character(strsplit(as.character(peptides[i]),
+                                                           "_")[[1]][1]),
+                                     "")[[1]])
     
     if (test_sequence > 0){
       
-      single_pep <- data[grep(paste0("\\b",peptides[i], "\\b"), data$Sequence),]
+      ## grabing each peptide
+      
+      match_pep_features <- strsplit(peptides[i], "_")[[1]]
+      
+      single_pep_matches <- which(match_pep_features[1] == data$Sequence &
+                                  match_pep_features[2] == data$Charge &
+                                  match_pep_features[3] == round(data$Retantion.Time..min.) &
+                                  match_pep_features[4] == round(data$m.z))
+      
+      single_pep <- data[single_pep_matches,]
+      
+      #single_pep <- data[grep(paste0("\\b",peptides[i], "\\b"), data$Sequence),]
       
       ## filtering out repeated peptide peaks
       
-      single_pep = single_pep[!duplicated(single_pep$Intensity.0),]
+      single_pep = single_pep[!duplicated(single_pep[,1]),]
       
       ## grabbing identical peptides but differently charged separately
       
@@ -141,6 +170,8 @@ isotopeEnrichment <- function(PyResultsDir,
         
         singlesingle_pep <- single_pep
         
+        #singlesingle_pep = unique(singlesingle_pep[,1:2])
+        
         ## grabbing molecular formula and potentially labelled residue number
         
         runner <- paste0(gsub(" ", x = unique(singlesingle_pep$Formula),
@@ -158,6 +189,7 @@ isotopeEnrichment <- function(PyResultsDir,
         
       } 
     }
+    
     MeasurementFile <- rbind(MeasurementFile, MeasurMat)
   }
   
@@ -173,7 +205,14 @@ isotopeEnrichment <- function(PyResultsDir,
   
   charges_part <- apply(Molecule_names[2,], 2, as.character)
   
-  MoleculeFile <- as.data.frame(cbind(Molecule = unique(paste0(Sequence_part, "_", charges_part)),
+  RT_part <- apply(Molecule_names[3,], 2, as.character)
+  
+  MZ_part <- apply(Molecule_names[4,], 2, as.character)
+  
+  MoleculeFile <- as.data.frame(cbind(Molecule = unique(paste0(Sequence_part,
+                                                               "_", charges_part,
+                                                               "_", RT_part,
+                                                               "_", MZ_part)),
                                       "MS ion or MS/MS product ion" = Molecule,
                                       "MS/MS neutral loss" = NA))
   
