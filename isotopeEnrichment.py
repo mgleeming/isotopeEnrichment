@@ -34,14 +34,13 @@ parser.add_argument('--mzmlFile',
                             --mzmlFile sample3.mzML'
                     )
 parser.add_argument('--proteinGroupsFile',
-                    required = True,
                     type = str,
                     help = 'File path of proteinGroups.txt file produced by MaxQuant'
                     )
-parser.add_argument('--msmsScansFile',
+parser.add_argument('--modificationSpecificPeptidesFile',
                     required = True,
                     type = str,
-                    help = 'File path of msmsScans.txt file produced by MaxQuant'
+                    help = 'File path of modificationSpecificPeptides.txt file produced by MaxQuant'
                     )
 parser.add_argument('--minClusterWidth',
                     default = DEFAULT_MIN_CLUSTER_WIDTH,
@@ -111,21 +110,13 @@ class Peptide(object):
                 'rts' : [], 'ints' : [], 'mzs' : [], 'mzInts' : []
             }
 
-        if pd.isna(row['Precursor apex offset time']):
-            offset = 0
-        else:
-            offset = float(row['Precursor apex offset time'])
-        self.rt = float(row['Retention time']) + offset
-        self.trigger_rt = float(row['Retention time'])
-
-        self.TIC = float(row['Total ion current'])
-        self.mz = float(row['m/z'])
+        self.rt = float(row['Retention time'])
+        self.mz = (float(row['Mass']) + float(row['Charge']) * 1.00727647) / float(row['Charge'])
         self.z = int(row['Charge'])
         self.mods = row['Modifications']
-        self.mod_seq = row['Modified sequence']
         self.sequence = row['Sequence'].upper()
         self.proteinGroup = row['Proteins']
-
+        self.TIC = int(row['Intensity'])
         self.getFormula()
         self.getSpecialResidueCount(options)
 
@@ -194,43 +185,24 @@ def gauss(x, amp, cent, wid, scale = 1):
 def getPeptides(target_protein_ids, options):
     peptides = []
 
-    df = pd.read_csv(options.msmsScansFile, delimiter='\t')
+    df = pd.read_csv(options.modificationSpecificPeptidesFile, delimiter='\t')
 
     # filter to only identified spectra
-    df = df[df['Identified'] == '+']
-
-    peptideIndes = {}
-    counter = 0
+    df = df[df['Reverse'] != '+']
+    df = df[df['Potential contaminant'] != '+']
 
     print('Processing peptide targets')
     for index, row in df.iterrows():
 
-        counter += 1
+        if target_protein_ids:
+            # test if this MSMS spectrum matches a protein in target_protein_ids
+            matches = [_ for _ in target_protein_ids if _ in row['Proteins']]
+            if len(matches) == 0: continue
 
-        # skip unassigned or contaminant peptides
-        if len(row['Sequence']) < 2 or len(row['Proteins']) < 2 or 'CON__' in row['Proteins'] or row['Identified'] != '+': continue
-
-        if row['Sequence'] in peptideIndes.keys():
-            if abs(peptideIndes[row['Sequence']]['mz'] - float(row['m/z'])) < 0.001:
-                if int(peptideIndes[row['Sequence']]['z']) == int(row['Charge']):
-                    if abs(peptideIndes[row['Sequence']]['rt'] - float(row['Retention time'])) < 2:
-                        continue
-        else:
-            peptideIndes[row['Sequence']] = {
-                'mz': float(row['m/z']),
-                'z' : int(row['Charge']),
-                'rt' : float(row['Retention time'])
-            }
-
-        # test if this MSMS spectrum matches a protein in target_protein_ids
-        matches = [_ for _ in target_protein_ids if _ in row['Proteins']]
-        if len(matches) == 0: continue
-
-        # skip cases where charge in undetermined
-        if int(row['Charge']) == 0: continue
-
-        p = Peptide( row, options )
-        peptides.append(p)
+        for charge in row['Charges'].split(';'):
+            row['Charge'] = charge
+            p = Peptide( row, options )
+            peptides.append(p)
 
     peptides.sort(key = lambda x: x.TIC, reverse = True)
 
@@ -463,7 +435,6 @@ def drawPlots(peptides, outPath, options):
             ax[0].axvline(x = lbound, color = 'red', ls = 'dashed', lw = 0.73)
             ax[0].axvline(x = rbound, color = 'red', ls = 'dashed', lw = 0.75)
             ax[0].axvline(x = p.rt, color = 'blue', ls = 'dashed', lw = 0.75)
-            ax[0].axvline(x = p.trigger_rt, color = 'green', ls = 'dashed', lw = 0.75)
 
             # isotope abundances
             x = list(range(len(p.getQuantity(mzmlFile, 'abundances'))))
@@ -494,37 +465,39 @@ def main(options):
         os.makedirs(outPath)
     except:
         print ('\nOutput directory already exists! Exiting...\n')
-        sys.exit()
+#        sys.exit()
 
-    # get list of proteins containing '60S' string
-    df = pd.read_csv(options.proteinGroupsFile, delimiter='\t')
+    if options.proteinGroupsFile:
+        df = pd.read_csv(options.proteinGroupsFile, delimiter='\t')
 
-    if options.searchTerm:
-        if len(options.searchTerm) > 0:
-            # filter out invalid rows with no name
-            df = df[pd.notnull(df['Protein names'])]
+        if options.searchTerm:
+            if len(options.searchTerm) > 0:
+                # filter out invalid rows with no name
+                df = df[pd.notnull(df['Protein names'])]
 
-            newdf = df[ df['Protein names'].str.contains(options.searchTerm[0]) ]
-            for s in options.searchTerm[1:]:
-                newdf = pd.concat(
-                    [
-                        newdf,
-                        df[ df['Protein names'].str.contains(s) ],
-                    ],
-                    axis = 0
-                )
+                newdf = df[ df['Protein names'].str.contains(options.searchTerm[0]) ]
+                for s in options.searchTerm[1:]:
+                    newdf = pd.concat(
+                        [
+                            newdf,
+                            df[ df['Protein names'].str.contains(s) ],
+                        ],
+                        axis = 0
+                    )
+            else:
+                newdf = df
         else:
             newdf = df
+
+        proteins = newdf['Protein IDs'].tolist()
+
+        # unwrap protein groups
+        target_protein_ids = []
+        for pg in proteins:
+            pg_proteins = pg.split(';')
+            target_protein_ids.extend(pg_proteins)
     else:
-        newdf = df
-
-    proteins = newdf['Protein IDs'].tolist()
-
-    # unwrap protein groups
-    target_protein_ids = []
-    for pg in proteins:
-        pg_proteins = pg.split(';')
-        target_protein_ids.extend(pg_proteins)
+        target_protein_ids = None
 
     peptides = getPeptides(target_protein_ids, options)
     getEICData(peptides, outPath, options)
