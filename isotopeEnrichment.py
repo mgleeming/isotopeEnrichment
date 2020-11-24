@@ -82,7 +82,11 @@ class Isotope(object):
         self.index = index
         self.mzLL = mzLL
         self.mzHL = mzHL
-        self.intensity = 0
+        self.intensityArray = []
+        return
+
+    def integrate(self, indicies):
+        self.intensity = sum(self.intensityArray[indicies[0]:indicies[1]+1])
         return
 
 class Target(object):
@@ -103,11 +107,14 @@ class Target(object):
         self.rt = float(row['Retention time'])
         self.intensity = int(row['Intensity']) if not np.isnan(row['Intensity']) else 0
 
+        # used in every case
+        self.rts = []
+        self.isotopes = []
+
+        # use if --plot is given
         self.mzs = []
         self.mzInts = []
-        self.rts = []
         self.eicInts = []
-        self.isotopes = []
 
         for isotope in range(0, self.clusterWidth):
 
@@ -122,8 +129,8 @@ class Target(object):
 
             self.isotopes.append( Isotope ( isotope, mzLL, mzHL ))
 
-        self.minTargetLL = min([_.mzLL for _ in self.isotopes]) - 2
-        self.maxTargetHL = max([_.mzHL for _ in self.isotopes]) + 2
+        self.minTargetLL = min([_.mzLL for _ in self.isotopes]) - 1
+        self.maxTargetHL = max([_.mzHL for _ in self.isotopes]) + 1
         return
 
     def getNSpec(self, options):
@@ -136,19 +143,12 @@ class Target(object):
 
         # get N spec either side of this
         self.specIndicies = [self.nearest - options.avgNSpectra, self.nearest + options.avgNSpectra]
+
         return
 
     def integrateIsotopes(self):
         for iso in self.isotopes:
-            for speci in self.specIndicies:
-
-                specmzs = self.mzs[speci]
-                specints = self.mzInts[speci]
-
-                mask = np.where( (specmzs > iso.mzLL) & (specmzs < iso.mzHL))
-
-                intsubset = specints[mask]
-                iso.intensity += np.sum(intsubset)
+            iso.integrate(self.specIndicies)
         return
 
     def getMonoEIC(self):
@@ -159,6 +159,21 @@ class Target(object):
             intsubset = ints[mask]
             self.eicInts.append(np.sum(intsubset))
         return
+
+    def addSpec(self, time, mzs, ints, options):
+
+        self.rts.append(time)
+
+        # integrate spectrum for each isotope and add
+        for iso in self.isotopes:
+            mask = np.where( (mzs > iso.mzLL) & (mzs < iso.mzHL))
+            iso.intensityArray.append( np.sum(ints[mask]) )
+
+        if options.plot:
+            mask = np.where( (mzs > self.minTargetLL) & (mzs < self.maxTargetHL) )
+            self.mzs.append(mzs[mask])
+            self.mzInts.append(ints[mask])
+
 
 class Peptide(object):
 
@@ -209,16 +224,16 @@ class Peptide(object):
 
     def addTarget(self, row):
 
-        #check if peptide already exists
+        #check if target already exists
         if row['Raw file'] in self.dataFiles:
 
             # duplicate samplings can still exist
             # in these cases, take most intense peptide
             # --- is there any problem with this?
-
             target = [t for t in self.targets if t.dataFile == row['Raw file']]
             assert len(target) == 1
             target = target[0]
+
             rowInt = int(row['Intensity']) if not np.isnan(row['Intensity']) else 0
             if rowInt > target.intensity:
                 target.rt = float(row['Retention time'])
@@ -226,6 +241,7 @@ class Peptide(object):
 
             return
 
+        # not a duplicate sampling of an already seen peptide
         try:
             self.intensities.append(int(row['Intensity']))
         except ValueError: # nan val
@@ -238,11 +254,14 @@ class Peptide(object):
         self.dataFiles.append(row['Raw file'])
         return
 
-    def integrateIsotopeRegions(self, options):
+    def processTargets(self, options):
         for t in self.targets:
+
             t.getNSpec(options)
             t.integrateIsotopes()
-            t.getMonoEIC()
+
+            if options.plot:
+                t.getMonoEIC()
 
 def getEICData(peptides, options):
 
@@ -256,6 +275,7 @@ def getEICData(peptides, options):
 
         # get summed EIC intensity
         spectra = pymzml.run.Reader(mzmlFile)
+
         for s in spectra:
 
             if s.ms_level != 1: continue
@@ -273,17 +293,11 @@ def getEICData(peptides, options):
                     if str(t.dataFile) != str(os.path.basename(mzmlFile).split('.')[0]):
                         continue
 
-                    mask = np.where( (mzs > t.minTargetLL) & (mzs < t.maxTargetHL) )
-                    mzsubset = mzs[mask]
-                    intsubset = ints[mask]
-                    t.rts.append(time)
-                    t.mzs.append(mzsubset)
-                    t.mzInts.append(intsubset)
+                    t.addSpec(time, mzs, ints, options)
 
     return peptides
 
 def getPeptides(options):
-
 
     mzmlFileDir = options.mzmlFileDir
     mzmlFiles = [os.path.join(mzmlFileDir, f) for f in os.listdir(mzmlFileDir) if '.mzml' in f.lower()]
@@ -340,6 +354,7 @@ def getPeptides(options):
 def writeOutputTable(peptides):
 
     print('\n\tWriting output tables')
+
     # get mzx cluster width - used to add headers
     maxClusterWidth = max( [p.clusterWidth for p in peptides] )
 
@@ -426,12 +441,12 @@ def main(options):
         print ('\nOutput directory already exists! Exiting...\n')
         sys.exit()
 
-    peptides = getpeptides(options)
+    peptides = getPeptides(options)
 
     peptides = getEICData(peptides, options)
 
     for p in peptides:
-        p.integrateIsotopeRegions(options)
+        p.processTargets(options)
 
     writeOutputTable(peptides)
 
