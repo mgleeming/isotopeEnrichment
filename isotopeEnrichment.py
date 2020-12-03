@@ -361,7 +361,7 @@ def writeOutputTable(peptides):
     of1 = open(os.path.join(options.outDir, 'intensities.tsv'),'wt')
 
     text = '\t'.join(
-        ['ID', 'File', 'Sequence', 'Special Residue Count', 'Formula', 'Mass', 'Charge', 'm/z', 'Retantion Time (min)', 'Modifications'] + ['Intensity %s' % str(x) for x in range(maxClusterWidth)]
+        ['Peptide Key', 'MaxQuant ID', 'File', 'Sequence', 'Special Residue Count', 'Formula', 'Mass', 'Charge', 'm/z', 'Retantion Time (min)', 'Modifications'] + ['Intensity %s' % str(x) for x in range(maxClusterWidth)]
     )
 
     of1.write('%s\n'%(text))
@@ -370,7 +370,7 @@ def writeOutputTable(peptides):
 
             text = '\t'.join(
                 [str(x) for x in [
-                    t.targetID, t.dataFile, t.sequence, t.specialResidueCount, t.formula, t.mass, t.z, t.mz, t.rt, t.mods,]
+                    p.pepKey, t.targetID, t.dataFile, t.sequence, t.specialResidueCount, t.formula, t.mass, t.z, t.mz, t.rt, t.mods,]
                 ] + [
                     str(int(iso.intensity)) for iso in t.isotopes
                 ]
