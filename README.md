@@ -138,3 +138,21 @@ The isotopeEnrichment.R function arranges peptides into the required input files
                                               ReturnResultsObject = T,
                                               CorrectAlsoMonoisotopic = T,
                                               verbose = T)
+                                              
+# Statistical filters
+
+The statistical filters applied in this section are meant to remove falsely interpreted isotopolog abundances derived from "labelled" controls, this phenomenon can result from peptide coelution and contamination if the heavy isotopolog peaks with different peptides. This in turn results in an increased relative isotope abundance that does not come from the labelling experiment. This special scenario exemplifies the utility of having non-labelled controls in your samples.
+
+The filters are a dependendency of the R package [RandoDiStats](https://github.com/MSeidelFed/RandodiStats_package) and their usage and documentation can be found in the provided link.
+
+
+    ## data reduction based on class comparison algorithms
+    
+    library(RandoDiStats)
+    library(fitdistrplus)
+    library(raster)
+    library(lawstat)
+    library(matrixStats)
+    
+    
+    
