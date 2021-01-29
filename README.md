@@ -54,7 +54,7 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
 
 
 
-# IsotopeEnrichment help
+# isotopeEnrichment help
     usage: isotopeEnrichment.py [-h] [--searchTerm SEARCHTERM] --mzmlFile MZMLFILE
                                 [--proteinGroupsFile PROTEINGROUPSFILE] --modificationSpecificPeptidesFile
                                 MODIFICATIONSPECIFICPEPTIDESFILE [--minClusterWidth MINCLUSTERWIDTH]
@@ -112,7 +112,7 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
       --fwhmLim FWHMLIM     If specified, peptides with a FWHM greater than this value will be ignored.
 
 
-# enrichment calculations
+# Enrichment Calculations
 
 The isotopeEnrichment.R function arranges peptides into the required input files for natural isotopic abundance (NIA) correction and subsequent mean enrichment calculation. The caluclations are performed using the IsoCorrectoR R package:
 
