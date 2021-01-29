@@ -139,7 +139,7 @@ The isotopeEnrichment.R function arranges peptides into the required input files
                                               CorrectAlsoMonoisotopic = T,
                                               verbose = T)
                                               
-# Statistical filters
+# Statistical Filters
 
 The statistical filters applied in this section are meant to remove falsely interpreted isotopolog abundances derived from "labelled" controls, this phenomenon can result from peptide coelution and contamination if the heavy isotopolog peaks with different peptides. This in turn results in an increased relative isotope abundance that does not come from the labelling experiment. This special scenario exemplifies the utility of having non-labelled controls in your samples.
 
@@ -154,5 +154,19 @@ The filters are a dependendency of the R package [RandoDiStats](https://github.c
     library(lawstat)
     library(matrixStats)
     
-    
+    ## The enrichment file directory must be updated with the new date when run...
+
+    subset <- StatsFilters_EnrichmentSet(EnrichmentFileDir = "2020-12-05_072051/IsoCorrectoR_result_MeanEnrichment.csv",
+                                         Treatment = as.factor(c(rep("20C_Control",3),
+                                                                 rep("20C_L",3),
+                                                                 rep("4C_Control",3),
+                                                                 rep("4C_L",3))),
+                                         LabelFactor = as.factor(rep(c(rep("Control", 3),
+                                                                       rep("Labelled", 3)),2)))
+
+The function is interactive so for optimal usage it must be directly run in the console. The resulting object contains the significantly enriched peptides.
+
+# Protein Annotation
+
+
     
