@@ -6,11 +6,19 @@ isotopeEnrichment <- function(PyResultsDir,
   
   #### get data
   
-  data <- read.table(file = PyResultsDir, header = T, sep = "\t")
+  data <- read.table(file = PyResultsDir, header = T, sep = "\t", fill = T)
   
-  ### removing peptides without G or S
+  ### removing peptides without G or S 
+  ### (test this peptides for non-specific enrichment from other amino acids)
   
-  data = data[-c(which(data$Special.Residue.Count == 0)),]
+  rm_pep <- which(data$Special.Residue.Count == 0)
+  
+  if(length(rm_pep) > 0) {
+    
+    data = data[-c(rm_pep),]  
+    
+  }
+  
   rownames(data) <- paste0(rep("X", length(rownames(data))), rownames(data))
   
   ### Treatments
@@ -43,7 +51,7 @@ isotopeEnrichment <- function(PyResultsDir,
     
     TreatmentNo = length(Treatments)
     
-    dim_test <- na.omit(t(singlesingle_pep[1,10:dim(singlesingle_pep)[2]]))
+    dim_test <- na.omit(t(singlesingle_pep[1,12:dim(singlesingle_pep)[2]]))
     
     out_mat <- matrix(NA, nrow = dim(dim_test)[1], ncol = TreatmentNo)
     
@@ -58,7 +66,7 @@ isotopeEnrichment <- function(PyResultsDir,
       count = count + 1
       #print(count)
       
-      df_single_row <- na.omit(t(singlesingle_pep[i,10:dim(singlesingle_pep)[2]]))
+      df_single_row <- na.omit(t(singlesingle_pep[i,12:dim(singlesingle_pep)[2]]))
       
       alocation <- which(singlesingle_pep$File[i] == colnames(out_mat))
       
@@ -66,14 +74,7 @@ isotopeEnrichment <- function(PyResultsDir,
       
     }
     
-    IsoIDs <- paste0(as.character(rep(unique(singlesingle_pep$Sequence), dim(dim_test)[1])),
-                     "_",
-                     as.character(rep("Z", dim(dim_test)[1])),
-                     as.character(rep(unique(singlesingle_pep$Charge), dim(dim_test)[1])),
-                     "_",
-                     as.character(rep(unique(round(singlesingle_pep$Retantion.Time..min.)), dim(dim_test)[1])),
-                     "_",
-                     as.character(rep(unique(round(singlesingle_pep$m.z)), dim(dim_test)[1])),
+    IsoIDs <- paste0(rep(as.character(unique(singlesingle_pep$Peptide.Key)), dim(dim_test)[1]),
                      "_",
                      apply(list2df(strsplit(rownames(df_single_row), "\\.")), 2, as.character)[2,])
     
@@ -87,10 +88,7 @@ isotopeEnrichment <- function(PyResultsDir,
   
   ###### First step must be subset the matrix to group of identical peptides in bins
   
-  peptides <- unique(paste0(data$Sequence,
-                            "_", data$Charge,
-                            "_", round(data$Retantion.Time..min.),
-                            "_", round(data$m.z)))
+  peptides <- unique(data$Peptide.Key)
   
   cat("...", "\n")
   cat(paste0(length(peptides), " Peptides found"))
@@ -110,20 +108,13 @@ isotopeEnrichment <- function(PyResultsDir,
       
       ## grabing each peptide
       
-      match_pep_features <- strsplit(peptides[i], "_")[[1]]
-      
-      single_pep_matches <- which(match_pep_features[1] == data$Sequence &
-                                  match_pep_features[2] == data$Charge &
-                                  match_pep_features[3] == round(data$Retantion.Time..min.) &
-                                  match_pep_features[4] == round(data$m.z))
+      single_pep_matches <- which(peptides[i] == data$Peptide.Key)
       
       single_pep <- data[single_pep_matches,]
       
-      #single_pep <- data[grep(paste0("\\b",peptides[i], "\\b"), data$Sequence),]
-      
       ## filtering out repeated peptide peaks
       
-      single_pep = single_pep[!duplicated(single_pep[,1]),]
+      single_pep = single_pep[!duplicated(single_pep$File),]
       
       ## grabbing identical peptides but differently charged separately
       
@@ -133,8 +124,6 @@ isotopeEnrichment <- function(PyResultsDir,
         
         cat("...", "\n")
         cat(paste0("Peptide # ", i, " : ", peptides[i]))
-        cat("\n")
-        cat(paste0("Charge State(s): ", length(test_charges)))
         cat("...", "\n")
         
       }
@@ -170,8 +159,6 @@ isotopeEnrichment <- function(PyResultsDir,
         
         singlesingle_pep <- single_pep
         
-        #singlesingle_pep = unique(singlesingle_pep[,1:2])
-        
         ## grabbing molecular formula and potentially labelled residue number
         
         runner <- paste0(gsub(" ", x = unique(singlesingle_pep$Formula),
@@ -184,7 +171,7 @@ isotopeEnrichment <- function(PyResultsDir,
         
         ## grabbing the isotopologues
         
-        MeasurMat <- get_isotopologues(singlesingle_pep,
+        MeasurMat <- get_isotopologues(singlesingle_pep = singlesingle_pep,
                                        Treatments = as.character(unique(data$File)[1:TreatmentNo]))
         
       } 
@@ -193,26 +180,36 @@ isotopeEnrichment <- function(PyResultsDir,
     MeasurementFile <- rbind(MeasurementFile, MeasurMat)
   }
   
-  ## identifying and dealing with duplicated peptides (Enrichment does not allow duplicated names)
+  ## identifying and dealing with duplicated peptides 
+  ## (Enrichment does not allow duplicated names)
   
-  MeasurementFile = MeasurementFile[-c(which(duplicated(x = MeasurementFile, MARGIN = 1) == T)),]
+  dpl <- which(duplicated(x = MeasurementFile, MARGIN = 1) == T)
+  
+  if (length(dpl) > 0) {
+    
+    MeasurementFile = MeasurementFile[-c(dpl),]
+    
+  } else {
+    
+    cat("\n", "No Duplicated peptides found")
+    
+  }
   
   ##### Molecule file
   
   Molecule_names <- list2df(strsplit(MeasurementFile[,1], "_"))
   
-  Sequence_part <- apply(Molecule_names[1,], 2, as.character)
+  Sequence_part <- apply(Molecule_names[3,], 2, as.character)
   
-  charges_part <- apply(Molecule_names[2,], 2, as.character)
+  charges_part <- apply(Molecule_names[5,], 2, as.character)
   
-  RT_part <- apply(Molecule_names[3,], 2, as.character)
+  specialResidue_part <- apply(Molecule_names[1,], 2, as.character)
   
-  MZ_part <- apply(Molecule_names[4,], 2, as.character)
-  
-  MoleculeFile <- as.data.frame(cbind(Molecule = unique(paste0(Sequence_part,
-                                                               "_", charges_part,
-                                                               "_", RT_part,
-                                                               "_", MZ_part)),
+  MoleculeFile <- as.data.frame(cbind(Molecule = unique(paste0(specialResidue_part,
+                                                               "__",
+                                                               Sequence_part,
+                                                               "__", 
+                                                               charges_part)),
                                       "MS ion or MS/MS product ion" = Molecule,
                                       "MS/MS neutral loss" = NA))
   
