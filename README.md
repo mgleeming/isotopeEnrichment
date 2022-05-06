@@ -112,20 +112,33 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
       --fwhmLim FWHMLIM     If specified, peptides with a FWHM greater than this value will be ignored.
 
 
-# Enrichment Calculations
+# Enrichment Calculations (isotopeEnrichment.R & IsoCorrectoR::IsoCorrection())
 
-The isotopeEnrichment.R function arranges peptides into the required input files for natural isotopic abundance (NIA) correction and subsequent mean enrichment calculation. The caluclations are performed using the IsoCorrectoR R package:
+**A function to optimize peptide isotopolog intensities and transform them into IsoCorrectoR input files**
+
+The isotopeEnrichment.R function arranges peptides into the required input files for natural isotopic abundance (NIA) correction and subsequent mean enrichment calculation. The calculations are performed using the IsoCorrectoR R package:
 
 *Heinrich, P., Kohler, C., Ellmann, L., Kuerner, P., Spang, R., Oefner, P. J., and Dettmer, K. (2018). Correcting for natural isotope abundance and tracer impurity in MS-, MS/MS- and high-resolution-multiple-tracer-data from stable isotope labeling experiments with IsoCorrectoR. Sci. Rep. 8.*
+
+This function allows users to grab the output "intensities.tsv" table from isotopeEnrichment.py and transform it into the correct input format for IsoCorrectoR while selecting and optimal number of isotopolog peaks per peptide entry. Optimization of the isotopolog number relies on estimating first how many isotopologs can be expected from the atomic composition of each peptide and their natural isotopic abundance and secondly from the labelling percentage in soluble amino acid pools and the number of labelled amino acid residues in each peptide sequence.
+
 
 
     ## preparing results files for correction
 
-    IsEnr <- isotopeEnrichment(PyResultsDir = "result.dat", returnCSV = T, verbose = T)
+    IsEnr <- isotopeEnrichment(PyResultsDir = "intensities.tsv",
+                               returnCSV = T,
+                               verbose = T,
+                               rmIsotopologs = 0,
+                               OptimizeIsotopologNr = T,
+                               files2correct = list.files(path = ".", pattern = "Norm_Factor"),
+                               AA4correction = c("Serine", "Glycine"),
+                               AAinterprtFileDir = "AminoAcidNames2SingleLetters.csv",
+                               ElementalFileDir = "ElementFile.csv",
+                               ProtPTMs = c("OX", "AC"),
+                               LabelledSamplesNr = 6)
 
     ## performing NIA correction and mean enrichment calculation
-
-    library(IsoCorrectoR)
 
     Enrichment <- IsoCorrectoR::IsoCorrection(MeasurementFile = "MeasurementFile.csv",
                                               ElementFile = "ElementFile.csv",
@@ -138,35 +151,106 @@ The isotopeEnrichment.R function arranges peptides into the required input files
                                               ReturnResultsObject = T,
                                               CorrectAlsoMonoisotopic = T,
                                               verbose = T)
-                                              
-# Statistical Filters
 
-The statistical filters applied in this section are meant to remove falsely interpreted isotopolog abundances derived from "labelled" controls, this phenomenon can result from peptide coelution and contamination if the heavy isotopolog peaks with different peptides. This in turn results in an increased relative isotope abundance that does not come from the labelling experiment. This special scenario exemplifies the utility of having non-labelled controls in your samples.
+# Statistical Filters (EnrichmentSet.R)
+
+**A function to apply thresholds and test statistically peptide enrichment in order to obtain good quality labelled peptide subsets**
+
+The statistical filters applied in this section are meant to remove falsely interpreted isotopolog abundances derived from "labelled" controls, this phenomenon can result from peptide coelution and contamination if the heavy isotopolog peaks with different peptides. This in turn results in an increased relative isotope abundance that does not come from the labelling experiment. This special scenario exemplifies the utility of having non-labelled controls in your samples. This function allows users to apply thresholds on residual labelling, noise and multiple parameters that leverage on the quality of the information that is delivered. The function returns a list of peptide subsets that fit the selected criteria and may be fed as input to the subsequent function in order to annotate their parent protein identities in the experimental dataset.
 
 The filters are a dependendency of the R package [RandoDiStats](https://github.com/MSeidelFed/RandodiStats_package) and their usage and documentation can be found in the provided link.
 
 
     ## data reduction based on class comparison algorithms
     
-    library(RandoDiStats)
-    library(fitdistrplus)
-    library(raster)
-    library(lawstat)
-    library(matrixStats)
-    
     ## The enrichment file directory must be updated with the new date when run...
 
-    subset <- StatsFilters_EnrichmentSet(EnrichmentFileDir = "2020-12-05_072051/IsoCorrectoR_result_MeanEnrichment.csv",
-                                         Treatment = as.factor(c(rep("20C_Control",3),
-                                                                 rep("20C_L",3),
-                                                                 rep("4C_Control",3),
-                                                                 rep("4C_L",3))),
-                                         LabelFactor = as.factor(rep(c(rep("Control", 3),
-                                                                       rep("Labelled", 3)),2)))
+    Subset <- EnrichmentSet(EnrichmentFileDir = "IsoCorrectoR_result_MeanEnrichment.csv",
+                                      Treatment = as.factor(c(rep("Control_NL",3),
+                                                              rep("Control_L",3),
+                                                              rep("Treatment_NL",3),
+                                                              rep("Treatment_L",3))),
+                                      LabelFactor = as.factor(rep(c(rep("Control", 3),
+                                                                    rep("Labelled", 3)),2)),
+                                      NLMAX = 0.002,
+                                      LEnrLack = 0.02,
+                                      SigLab = 0.05,
+                                      SigLabControl = 0.05,
+                                      SigLabTreatment = 0.05, 
+                                      CorrectLab = T)
 
-The function is interactive so for optimal usage it must be directly run in the console. The resulting object contains the significantly enriched peptides.
+The function is interactive so you will need to type in the R console while running it. The resulting object contains significantly enriched peptides.
 
-# Protein Annotation
+# Protein identification
 
+**A function to identify and compile protein enrichment information from a fed peptide subset**
 
-    
+This function allows user identify the parent proteins from peptide subsets, highlight the coverage of the peptides in the protein sequence, retrieve and visualize the noise-corrected enrichments (non-corrected LPFs) and return an output table that is necessary for the next function in the workflow, which corrects LPFs.
+
+ID the parent proteins from the labelled / important peptides
+
+    AnnotateProt <- AnnotateProteins(PeptideVector = Reduce(f = union, x = Subset),
+                                     Treatment = as.factor(c(rep("Control_NL",3),
+                                                             rep("Control_L",3),
+                                                             rep("Treatment_NL",3),
+                                                             rep("Treatment_L",3))),
+                                     LabelFactor = as.factor(rep(c(rep("Control", 3),
+                                                             rep("Labelled", 3)),2)),
+                                     FileName = "NL2_in_14N_controls",
+                                     Path2FASTA = "160517_Hv_IBSC_PGSB_r1_proteins_HighConf_REPR_annotation.fasta",
+                                     Path2MQev = "evidence.txt",
+                                     EnrichmentFileDir = "IsoCorrectoR_result_MeanEnrichment.csv",
+                                     cexSeq = 0.85,
+                                     ProtPTMs = c("OX", "AC"),
+                                     SeqCharLength = 70,
+                                     GroupPeptides = F,
+                                     verbose = T,
+                                     CorrectLab = T)
+									 
+# Labelled peptide fraction (LPFs) correction
+
+**A function to turn non-corrected into corrected labelled peptide/protein fractions (Corr LPFs)**
+
+This function allows users to input their non-corrected LPF matrix from "AnnotateProteins.R" and correct the fractional enrichment in individual peptides using the enrichment percentages in amino acid soluble pools from paired treatments. The function returns the corrected matrix, which can be directly used to calculate fractional synthesis rates.
+
+	Correction_LPF <- LPFcorrection(InputNonCorrMat = AnnotateProt,
+                                    files2correct = list.files(path = ".",
+                                                               pattern = "Mean_Norm_Factor",
+                                                               all.files = T,
+                                                               full.names = T,
+                                                               recursive = F, include.dirs = T),
+                                    AA4correction = c("Serine", "Glycine"),
+                                    AAinterprtFileDir = "AminoAcidNames2SingleLetters.csv",
+                                    ProtPTMs = c("OX", "AC"),
+                                    CorrectMeans = F, 
+                                    EnrBoundary = 50, 
+                                    GroupPeptides = F)
+								
+# Protein fractional synthesis rates (K_s)
+
+The calculation uses corrected labelled peptide fractions (LPFs) and multiplies them by the relative growth rate times 100 in order to turn individual enrichments into individual protein fractional snythesis rates. First the calculation requieres a estimate of the growth rates. In our exemplary test-case growth rates were calculated in dependance to drw weight and protein accumulation dynamics, the RGR table look like this:
+
+										   | Treatment | corr_mean_RGR |           
+                                -----------| ----------|------------   |
+                         		 4°C       | Cold      | 0.018695011   |
+                                 20°C      | Control   | 0.002082894   |
+
+Subsequently the calculation can be simply done by:
+
+	Ks <- matrix(NA, nrow = nrow(Correction_LPF), ncol = 0)
+
+	for (i in 1:nrow(corr_mean_RGR)) {
+  
+		Treatment_col_runner <- as.matrix(Correction_LPF[,grep(pattern = rownames(corr_mean_RGR)[i],
+                                                               colnames(Correction_LPF)[1:6])])
+  
+		Ks <- cbind(Ks, (apply(Treatment_col_runner, 2, as.numeric) * corr_mean_RGR[i,2] * 100))
+  
+	}
+
+	colnames(Ks) <- paste0("Ks_", c(rep(rownames(corr_mean_RGR)[1], 3), rep(rownames(corr_mean_RGR)[2], 3)), "(% per mg-DW per h)")
+
+	Final_table <- cbind(Ks, Correction_LPF)
+	
+The synthesis rates are the bound at the beggining of the corrected LPF table and ready to export.
+
