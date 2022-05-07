@@ -230,7 +230,7 @@ This function allows users to input their non-corrected LPF matrix from "Annotat
 
 The calculation uses corrected labelled peptide fractions (LPFs) and multiplies them by the relative growth rate times 100 in order to turn individual enrichments into individual protein fractional snythesis rates. First the calculation requieres a estimate of the growth rates. In our exemplary test-case growth rates were calculated in dependance to drw weight and protein accumulation dynamics, the RGR table look like this:
 
-   			                     | Treatment | corr_mean_RGR |           
+   			                    | Treatment | corr_mean_RGR |           
     			 -----------| ----------|------------   |
      			  4°C       | Cold      | 0.018695011   |
      			  20°C      | Control   | 0.002082894   |
