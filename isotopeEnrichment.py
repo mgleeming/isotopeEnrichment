@@ -26,7 +26,6 @@ parser.add_argument('--searchTerm',
                             multiple argument/value pairs. For exmaple --searchTerm 60S --searchTerm 40S --searchTerm 30S'
                     )
 parser.add_argument('--mzmlFile',
-                    required = True,
                     action = 'append',
                     type = str,
                     help = 'File path of mzML data files. To specify multiple mzML files, include multiple \
@@ -38,7 +37,6 @@ parser.add_argument('--proteinGroupsFile',
                     help = 'File path of proteinGroups.txt file produced by MaxQuant'
                     )
 parser.add_argument('--modificationSpecificPeptidesFile',
-                    required = True,
                     type = str,
                     help = 'File path of modificationSpecificPeptides.txt file produced by MaxQuant'
                     )
@@ -100,6 +98,24 @@ parser.add_argument('--fwhmLim',
                     type = float,
                     help = 'If specified, peptides with a FWHM greater than this value will be ignored.'
                     )
+parser.add_argument('--isSpectronaut',
+                    action = 'store_true',
+                    help = 'Input file is from spectronaut',
+                    )
+parser.add_argument('--spectronaut_file',
+                    type = str,
+                    help = 'File path for spectronaut output.'
+                    )
+parser.add_argument('--writeSchema',
+                    action = 'store_true',
+                    help = 'Write schema for input file list. Can be used to define treatment and control sample groupings'
+                    )
+parser.add_argument('--schema',
+                    type = str,
+                    help = 'Path to the schema file'
+                    )
+
+PROTON = 1.00727647
 
 class Peptide(object):
     def __init__(self, row, options):
@@ -110,6 +126,14 @@ class Peptide(object):
                 'rts' : [], 'ints' : [], 'mzs' : [], 'mzInts' : []
             }
 
+        if options.isSpectronaut:
+            self.read_spectronaut(row)
+        else:
+            self.read_mq(row)
+
+        return
+
+    def read_mq(self, row):
         self.rt = float(row['Retention time'])
         self.mz = (float(row['Mass']) + float(row['Charge']) * 1.00727647) / float(row['Charge'])
         self.z = int(row['Charge'])
@@ -117,10 +141,18 @@ class Peptide(object):
         self.sequence = row['Sequence'].upper()
         self.proteinGroup = row['Proteins']
         self.TIC = int(row['Intensity'])
-        self.getFormula()
-        self.getSpecialResidueCount(options)
+        return
 
-        self.getTargets(options)
+    def read_spectronaut(self, row):
+        self.rt = float(row['EG.ApexRT'].mean())
+        self.mass = float(row['FG.PrecMz'].mean()) * float(row['FG.Charge'].mean()) - float(row['FG.Charge'].mean()) * PROTON
+        self.mz = float(row['FG.PrecMz'].mean())
+        self.z = int(row['FG.Charge'].mean())
+        self.TIC = int(row['FG.Quantity'].mean())
+        row = row.iloc[0]
+        self.mods = row['EG.ModifiedSequence']
+        self.sequence = row['EG.StrippedSequence'].upper()
+        self.proteinGroup = row['PG.ProteinAccessions']
         return
 
     def appendQuantity(self, mzmlFile, attribute, quantity):
@@ -215,6 +247,62 @@ def getPeptides(target_protein_ids, options):
             )
 
     return peptides
+
+class InputReader(object):
+
+    def __init__(self, options):
+
+        if not any([options.schema, options.writeSchema]):
+            print('No schema options supplied')
+            sys.exit()
+
+        if options.writeSchema:
+            if options.isSpectronaut:
+                self.writeSchemaFromSpectronaut(df)
+            else:
+                print('INVALID OPTIONS')
+            sys.exit()
+        return
+
+    def getPeptides(self, options):
+        if options.isSpectronaut:
+            self.readSpectronaut(options)
+        return
+
+    def writeSchemaFromSpectronaut(self, df):
+        files = list(set(df['R.FileName'].tolist()))
+        of1 = open('fileSchema.tsv','wt')
+        of1.write('File,Group\n'%())
+        for f in files:
+            of1.write('%s,\n'%f)
+        of1.close()
+        return
+
+    def readSpectronaut(self, options):
+
+        peptides = []
+
+        # read control files from schema
+        schema = pd.read_csv(options.schema)
+        control_samples = list(set(schema[schema['Group'] == 'Control']['File'].tolist()))
+        df = pd.read_csv(options.spectronaut_file, delimiter='\t')
+
+        # subset entire df to only files in control samples list
+        print(len(df))
+        df = df[df['R.FileName'].isin(control_samples)]
+
+        print(len(df))
+        print('Processing peptide targets')
+        for index,group in df.groupby(['EG.PrecursorId']):
+
+            if len(group) != len(control_samples): continue
+
+            print(group)
+            p = Peptide( group, options )
+            peptides.append(p)
+
+        print(len(peptides))
+        return
 
 def getEICData(peptides, outPath, options):
 #    base = os.path.basename(options.mzmlFile)
@@ -467,39 +555,11 @@ def main(options):
         print ('\nOutput directory already exists! Exiting...\n')
 #        sys.exit()
 
-    if options.proteinGroupsFile:
-        df = pd.read_csv(options.proteinGroupsFile, delimiter='\t')
+#    peptides = getPeptides(options)
 
-        if options.searchTerm:
-            if len(options.searchTerm) > 0:
-                # filter out invalid rows with no name
-                df = df[pd.notnull(df['Protein names'])]
-
-                newdf = df[ df['Protein names'].str.contains(options.searchTerm[0]) ]
-                for s in options.searchTerm[1:]:
-                    newdf = pd.concat(
-                        [
-                            newdf,
-                            df[ df['Protein names'].str.contains(s) ],
-                        ],
-                        axis = 0
-                    )
-            else:
-                newdf = df
-        else:
-            newdf = df
-
-        proteins = newdf['Protein IDs'].tolist()
-
-        # unwrap protein groups
-        target_protein_ids = []
-        for pg in proteins:
-            pg_proteins = pg.split(';')
-            target_protein_ids.extend(pg_proteins)
-    else:
-        target_protein_ids = None
-
-    peptides = getPeptides(target_protein_ids, options)
+    reader = InputReader(options)
+    peptides = reader.getPeptides(options)
+    sys.exit()
     getEICData(peptides, outPath, options)
 
     if options.profile:
@@ -512,5 +572,4 @@ def main(options):
 
 if __name__ == '__main__':
     options =  parser.parse_args()
-
     main(options)

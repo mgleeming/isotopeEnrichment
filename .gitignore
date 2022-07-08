@@ -9,3 +9,5 @@
 save.p
 /venv
 /results
+*.csv
+*.tsv
