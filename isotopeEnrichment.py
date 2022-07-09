@@ -1,4 +1,4 @@
-import os, sys, pymzml, pickle, shutil, argparse
+import os, sys, pymzml, pickle, shutil, argparse, itertools
 import numpy as np
 import pandas as pd
 import scipy.signal
@@ -25,12 +25,9 @@ parser.add_argument('--searchTerm',
                             If omitted, all peptides will be included. To specify multiple search terms, include \
                             multiple argument/value pairs. For exmaple --searchTerm 60S --searchTerm 40S --searchTerm 30S'
                     )
-parser.add_argument('--mzmlFile',
-                    action = 'append',
+parser.add_argument('--mzmlFileDir',
                     type = str,
-                    help = 'File path of mzML data files. To specify multiple mzML files, include multiple \
-                            argument/value pairs. For example --mzmlFile sample1.mzML --mzmlFile sample2.mzML \
-                            --mzmlFile sample3.mzML'
+                    help = 'Path to directory containing mzML files'
                     )
 parser.add_argument('--proteinGroupsFile',
                     type = str,
@@ -117,19 +114,68 @@ parser.add_argument('--schema',
 
 PROTON = 1.00727647
 
-class Peptide(object):
-    def __init__(self, row, options):
+class Quantities(object):
 
-        self.peptideQuant = {}
-        for mzmlFile in options.mzmlFile:
-            self.peptideQuant[mzmlFile] = {
-                'rts' : [], 'ints' : [], 'mzs' : [], 'mzInts' : []
-            }
+    def __init__(self, mzmlFile, peptide):
+        self.mzmlFile = mzmlFile
+        self.rts = []
+        self.spectrum_indicies = []
+        self.clusterWidth = peptide.clusterWidth
+        self.intDict = {c:[] for c in range(self.clusterWidth)}
+        return
+
+    def append_spectrum_index(self, index):
+        self.spectrum_indicies.append(index)
+
+    def append_rt(self, rt):
+        self.rts.append(rt)
+
+    def append_intensity(self, isotope, intensity):
+        self.intDict[isotope].append(intensity)
+
+    def find_peak(self):
+        print("FIND")
+
+        TO_USE = [0,1,2]
+
+        print(len(self.rts))
+        print(len(self.spectrum_indicies))
+        for c in range(self.clusterWidth):
+            print(len(self.intDict[c]))
+
+        for combination in itertools.combinations(TO_USE, 2):
+            print(combination)
+
+        # find RMSD for a sliding window
+
+        # set parameter for window length
+        # this is the expected peak width in scans
+
+        # find RMSD for window
+        # slide window across rt range
+
+        # min RMSD beccomes scan center
+        sys.exit()
+        return
+
+class Peptide(object):
+
+    def __init__(self, row, options, all_samples ):
 
         if options.isSpectronaut:
-            self.read_spectronaut(row)
+            self.read_spectronaut(row, options)
         else:
             self.read_mq(row)
+
+        self.getFormula()
+        self.getSpecialResidueCount(options)
+        self.getTargets(options)
+
+        self.all_mzml_files = all_samples
+
+        self.peptideQuant = {}
+        for mzmlFile in all_samples:
+            self.peptideQuant[mzmlFile] = Quantities(mzmlFile, self)
 
         return
 
@@ -143,12 +189,24 @@ class Peptide(object):
         self.TIC = int(row['Intensity'])
         return
 
-    def read_spectronaut(self, row):
+    def read_spectronaut(self, row, options):
+        # RT
         self.rt = float(row['EG.ApexRT'].mean())
+        self.rt_obs_ll = float(row['EG.StartRT'].min())
+        self.rt_obs_hl = float(row['EG.EndRT'].max())
+
+        self.rt_extraction_ll = self.rt_obs_ll - options.eicLength
+        self.rt_extraction_hl = self.rt_obs_hl + options.eicLength
+
+        # Mass and m/z
         self.mass = float(row['FG.PrecMz'].mean()) * float(row['FG.Charge'].mean()) - float(row['FG.Charge'].mean()) * PROTON
         self.mz = float(row['FG.PrecMz'].mean())
         self.z = int(row['FG.Charge'].mean())
+
+        # intensities
         self.TIC = int(row['FG.Quantity'].mean())
+
+        # sequence and mods
         row = row.iloc[0]
         self.mods = row['EG.ModifiedSequence']
         self.sequence = row['EG.StrippedSequence'].upper()
@@ -174,7 +232,6 @@ class Peptide(object):
             )
         else:
             self.specialResidueCount = 0
-
         return
 
     def getTargets(self, options):
@@ -209,6 +266,84 @@ class Peptide(object):
         self.formula = ''
         for c in composition:
             self.formula += '%s%s ' %(c, composition[c])
+        return
+
+    def find_peaks(self):
+        for mzml_fine, quant_object in self.peptideQuant.items():
+            quant_object.find_peak()
+        return
+
+class InputReader(object):
+
+    def __init__(self, options):
+
+        if not any([options.schema, options.writeSchema]):
+            print('No schema options supplied')
+            sys.exit()
+
+        if options.writeSchema:
+            if options.isSpectronaut:
+                self.writeSchemaFromSpectronaut(df)
+            else:
+                print('INVALID OPTIONS')
+            sys.exit()
+        return
+
+    def getPeptides(self, options):
+
+        if options.schema:
+            self.readSchemaFile(options)
+        else:
+            print('No schema file supplied - exiting')
+            sys.exit()
+
+        if options.isSpectronaut:
+            self.readSpectronaut(options)
+        return
+
+    def readSchemaFile(self, options):
+        # read control files from schema
+        self.schema = pd.read_csv(options.schema)
+        return
+
+    def writeSchemaFromSpectronaut(self, df):
+        files = list(set(df['R.FileName'].tolist()))
+        of1 = open('fileSchema.tsv','wt')
+        of1.write('File,Group\n'%())
+        for f in files:
+            of1.write('%s,\n'%f)
+        of1.close()
+        return
+
+    def readSpectronaut(self, options):
+
+        self.peptides = []
+
+        control_samples = list(set(self.schema[self.schema['Group'] == 'Control']['File'].tolist()))
+        all_samples = list(set(self.schema['File'].tolist()))
+
+        # read spectronaut dataframe
+        df = pd.read_csv(options.spectronaut_file, delimiter='\t')
+
+        # subset entire df to only files in control samples list
+        df = df[df['R.FileName'].isin(control_samples)]
+
+        print('Processing peptide targets')
+        for index, group in df.groupby(['EG.PrecursorId']):
+
+            # quick filter
+            if len(group) != len(control_samples): continue
+            if len(set(group['R.FileName'].tolist())) != len(control_samples): continue
+
+            p = Peptide( group, options, all_samples )
+            self.peptides.append(p)
+
+        print('Found %s peptides' %len(self.peptides))
+        return
+
+    def find_peaks(self):
+        for p in self.peptides:
+            p.find_peaks()
         return
 
 def gauss(x, amp, cent, wid, scale = 1):
@@ -248,78 +383,71 @@ def getPeptides(target_protein_ids, options):
 
     return peptides
 
-class InputReader(object):
+def extract_isotopologue_EICS(reader, options):
 
-    def __init__(self, options):
 
-        if not any([options.schema, options.writeSchema]):
-            print('No schema options supplied')
-            sys.exit()
+    '''
+    New fitting procedure
+    ---------------------
 
-        if options.writeSchema:
-            if options.isSpectronaut:
-                self.writeSchemaFromSpectronaut(df)
-            else:
-                print('INVALID OPTIONS')
-            sys.exit()
-        return
+    1) extract individual isotope EICs
+    2) select a subset of these that will be used in step 3
+    3) apply a DIA-like procedure to select RT window
+        - the subset of EICs should co-elute - find overlapping regions
+    4) select top of peaks from DIA reconstruction
 
-    def getPeptides(self, options):
-        if options.isSpectronaut:
-            self.readSpectronaut(options)
-        return
+    '''
 
-    def writeSchemaFromSpectronaut(self, df):
-        files = list(set(df['R.FileName'].tolist()))
-        of1 = open('fileSchema.tsv','wt')
-        of1.write('File,Group\n'%())
-        for f in files:
-            of1.write('%s,\n'%f)
-        of1.close()
-        return
 
-    def readSpectronaut(self, options):
+    '''
+        1) Extract individual isotopologue EIC traces
+    '''
+    files = [_ for _ in os.listdir(options.mzmlFileDir) if '.mzml' in _.lower()]
+    files_without_extensions = [_.split('.')[0] for _ in files]
 
-        peptides = []
+    for mzml_file in reader.peptides[0].all_mzml_files:
 
-        # read control files from schema
-        schema = pd.read_csv(options.schema)
-        control_samples = list(set(schema[schema['Group'] == 'Control']['File'].tolist()))
-        df = pd.read_csv(options.spectronaut_file, delimiter='\t')
+        print('Processing mzml file %s' %mzml_file)
+        # check file exists
+        if mzml_file not in files_without_extensions:
+            print('Warning: mzml file %s not found! Skipping...')
+            continue
 
-        # subset entire df to only files in control samples list
-        print(len(df))
-        df = df[df['R.FileName'].isin(control_samples)]
+        mzml_file_full_path = os.path.join(options.mzmlFileDir, mzml_file) + '.mzML'
+        for spectrumi, s in enumerate(pymzml.run.Reader(mzml_file_full_path)):
 
-        print(len(df))
-        print('Processing peptide targets')
-        for index,group in df.groupby(['EG.PrecursorId']):
+            if s.ms_level != 1: continue
+            time = s.scan_time_in_minutes()
+            mzs = s.mz
+            ints = s.i
 
-            if len(group) != len(control_samples): continue
+            for i, p in enumerate(reader.peptides):
+                if time < p.rt_extraction_ll: continue
+                if time > p.rt_extraction_hl: continue
 
-            print(group)
-            p = Peptide( group, options )
-            peptides.append(p)
+                p.peptideQuant[mzml_file].append_rt(time)
+                p.peptideQuant[mzml_file].append_spectrum_index(spectrumi)
 
-        print(len(peptides))
-        return
+                for isotopei, t in enumerate(p.targets):
+                    mzIndices = np.where((mzs > t[0]) & (mzs < t[1]))
+                    eic_intensity = np.sum(ints[mzIndices])
+                    p.peptideQuant[mzml_file].append_intensity(isotopei, eic_intensity)
+        break
+    return
 
-def getEICData(peptides, outPath, options):
-#    base = os.path.basename(options.mzmlFile)
-#    output = 'result_%s.dat' %base.split('.')[0]
+def getEICData_old(peptides, outPath, options):
+
     output = 'result.dat'
 
     print('Found %s peptide targets' %len(peptides))
 
     of1 = open(os.path.join(outPath, output),'wt')
-
-
     maxClusterWidth = max( [p.clusterWidth for p in peptides] )
-
     text = '\t'.join(
         ['File', 'Sequence', 'Special Residue Count', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(maxClusterWidth)]
     )
     of1.write('%s\n'%(text))
+
     for mzmlFile in options.mzmlFile:
         print('Processing %s' %mzmlFile)
 
@@ -556,10 +684,19 @@ def main(options):
 #        sys.exit()
 
 #    peptides = getPeptides(options)
+    import pickle
+    test = True
+    if not test:
+        peptides = InputReader(options)
+        peptides.getPeptides(options)
+        extract_isotopologue_EICS(peptides, options)
+        pickle.dump(peptides, open('peptides.pickle','wb'))
+    else:
+        peptides = pickle.load(open('peptides.pickle','rb'))
 
-    reader = InputReader(options)
-    peptides = reader.getPeptides(options)
+    peptides.find_peaks()
     sys.exit()
+
     getEICData(peptides, outPath, options)
 
     if options.profile:

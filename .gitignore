@@ -11,3 +11,4 @@ save.p
 /results
 *.csv
 *.tsv
+*.pickle
