@@ -643,7 +643,7 @@ def main(options):
     extract_isotopologue_EICS(peptides, options)
 
     peptides.find_peaks()
-    pickle.dump(peptides, open(os.path.join(outPath, options.outFileName +'.pickle','wb'))
+    pickle.dump(peptides, open(os.path.join(outPath, options.outFileName + '.pickle','wb')))
 
     write_report(peptides, options)
 
