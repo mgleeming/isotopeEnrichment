@@ -12,3 +12,4 @@ save.p
 *.csv
 *.tsv
 *.pickle
+*.sh

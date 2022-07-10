@@ -5,13 +5,16 @@ import scipy.signal
 import scipy.optimize as opt
 import pyteomics.mass as pymass
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+
 
 DEFAULT_MIN_CLUSTER_WIDTH = 5
-DEFAULT_EXTRACTION_WIDTH = 0.01
-DEFAULT_EXTRACTION_LENGTH = 0.5
+DEFAULT_EXTRACTION_WIDTH = 10
+DEFAULT_EXTRACTION_LENGTH = 1
 DEFAULT_ISOTOPE_WEIGHT = 1
 DEFAULT_SPECTRA_TO_AVERAGE = 2
 DEFAULT_OUT_DIR_NAME = 'results'
+DEFAULT_OUT_FILE_NAME = 'results.dat'
 
 parser = argparse.ArgumentParser(
     description = 'Extract peptide isotope abundances from LCMS data'
@@ -59,7 +62,7 @@ parser.add_argument('--avgNSpectra',
 parser.add_argument('--eicWidth',
                     default = DEFAULT_EXTRACTION_WIDTH,
                     type = float,
-                    help = 'width (in m/z) used to produce EIC plots'
+                    help = 'width (in ppm) used to produce EIC plots'
                     )
 parser.add_argument('--eicLength',
                     default = DEFAULT_EXTRACTION_LENGTH,
@@ -86,6 +89,10 @@ parser.add_argument('--plotTopN',
 parser.add_argument('--outDirName',
                     help = 'Results directory name',
                     default = DEFAULT_OUT_DIR_NAME
+                    )
+parser.add_argument('--outFileName',
+                    help = 'Results file name',
+                    default = DEFAULT_OUT_FILE_NAME
                     )
 parser.add_argument('--profile',
                     action = 'store_true',
@@ -122,7 +129,44 @@ class Quantities(object):
         self.spectrum_indicies = []
         self.clusterWidth = peptide.clusterWidth
         self.intDict = {c:[] for c in range(self.clusterWidth)}
+
+        self.scans_to_extract = None
+        self.local_scans_to_extract = None
         return
+
+    def get_score(self):
+        try:
+            return self.correlation_score_fraction
+        except:
+            return 0
+
+    def get_rt_boundaries_for_integrated_peak(self):
+
+        try:
+            lbound = self.rts[min(self.local_scans_to_extract)]
+            rbound = self.rts[max(self.local_scans_to_extract)]
+        except TypeError:
+            # occurs when scans to extract is None
+            return None, None
+        return lbound, rbound
+
+    def get_quantities_to_report(self):
+        result = []
+
+        if len(self.scans_to_extract) == 0:
+            self.result =  [0 for _ in range(self.clusterWidth)]
+            return self.result, 0
+
+        for c in range(self.clusterWidth):
+            result.append(
+                sum(
+                    self.intDict[c][ min(self.local_scans_to_extract) : max(self.local_scans_to_extract) ]
+                )
+            )
+
+        n_spectra_summed = len(self.local_scans_to_extract)
+        self.result = result
+        return result, n_spectra_summed
 
     def append_spectrum_index(self, index):
         self.spectrum_indicies.append(index)
@@ -134,33 +178,108 @@ class Quantities(object):
         self.intDict[isotope].append(intensity)
 
     def find_peak(self):
-        print("FIND")
 
         TO_USE = [0,1,2]
+        WINDOW = 3
+        THRESHOLD = 0.7
 
-        print(len(self.rts))
-        print(len(self.spectrum_indicies))
-        for c in range(self.clusterWidth):
-            print(len(self.intDict[c]))
+        corr_indicies, corr_rts, corr_corrs = [], [], []
+        for i in range(len(self.rts)):
 
-        for combination in itertools.combinations(TO_USE, 2):
-            print(combination)
+            subset = self.rts[i-WINDOW:i+WINDOW]
+            if len(subset) < WINDOW:
+                corr_rts.append(self.rts[i])
+                corr_corrs.append(0)
+                #corr_indicies.append(self.spectrum_indicies[i])
+                corr_indicies.append(i)
+                continue
 
-        # find RMSD for a sliding window
+            traces = np.array([self.intDict[trace][i-WINDOW:i+WINDOW] for trace in TO_USE])
 
-        # set parameter for window length
-        # this is the expected peak width in scans
+            # pearsons correlation
+            corr = np.corrcoef(traces)
 
-        # find RMSD for window
-        # slide window across rt range
+            # diagonals are correlation of x with x --> = 1
+            # exclude these
+            np.fill_diagonal(corr, 0)
 
-        # min RMSD beccomes scan center
-        sys.exit()
+            # get total correlation score
+            summed_correlation = np.sum(corr)
+            if np.isnan(summed_correlation):
+                summed_correlation = 0
+
+            corr_rts.append(self.rts[i])
+            corr_corrs.append(summed_correlation)
+#            corr_indicies.append(self.spectrum_indicies[i])
+            corr_indicies.append(i)
+
+        # threshold for total score
+        threshold = max(corr_corrs) * 0.5
+
+        if max(corr_corrs) <= 0:
+            self.scans_to_extract = []
+            return
+
+        corr_rts = np.asarray(corr_rts)
+        corr_corrs = np.asarray(corr_corrs)
+        corr_indicies = np.asarray(corr_indicies)
+
+        mask = np.where(corr_corrs > threshold)
+
+        # mzml file spectrum indicies of scans above correlation threshold
+        corr_scans_threshold = sorted(list(corr_indicies[mask]))
+
+        # the above may contain outliers
+        # when a real peak is found, there should be a run of spectra with score > threshold
+        # find largest set of consecutive spectra with score > threshold
+        scores = []
+        for i in range(len(corr_scans_threshold)):
+            i_score = 0
+            for j in range(i, len(corr_scans_threshold)):
+                if (corr_scans_threshold[j] - corr_scans_threshold[i]) == j-i:
+                    i_score += 1
+            scores.append([i, i_score])
+
+        scores.sort(key=lambda x: x[1], reverse = True)
+
+        # index == index of first spectrum in set
+        # step == offset betwen first and last spectrum in set
+        index, step = scores[0]
+
+        # scans to extract are scan indicies in the original mzML file
+        self.scans_to_extract = np.asarray(np.asarray(self.spectrum_indicies)[mask][index: index+step])
+
+        # local scans to extract are used to find subset of extracted points used for quant
+        self.local_scans_to_extract = np.asarray(corr_indicies[mask][index: index+step])
+
+        # find total score for identified region
+        self.correlation_score = np.sum(corr_corrs[mask][index: index+step]) / len(corr_corrs[mask][index: index+step])
+
+        max_score = len(TO_USE) * len(TO_USE) - len(TO_USE)
+        self.correlation_score_fraction = self.correlation_score / float(max_score)
+
+        # for plotting
+        plot = False
+        if plot:
+            fig = plt.figure()
+            axs = fig.subplots(2,1, gridspec_kw={'height_ratios': [3, 1]}, sharex = True)
+
+            for c in range(self.clusterWidth):
+                if c in TO_USE:
+                    axs[0].plot(self.rts, self.intDict[c])
+
+            min_subset_index = self.spectrum_indicies.index(min(self.scans_to_extract))
+            max_subset_index = self.spectrum_indicies.index(max(self.scans_to_extract))
+            axs[1].axvspan(self.rts[min_subset_index], self.rts[max_subset_index], color='blue', alpha=0.2)
+            axs[1].plot(corr_rts, corr_corrs)
+            plt.show()
         return
 
 class Peptide(object):
 
-    def __init__(self, row, options, all_samples ):
+    def __init__(self, row, options, all_samples, peptide_id):
+
+        self.peptide_id = peptide_id
 
         if options.isSpectronaut:
             self.read_spectronaut(row, options)
@@ -178,6 +297,9 @@ class Peptide(object):
             self.peptideQuant[mzmlFile] = Quantities(mzmlFile, self)
 
         return
+
+    def get_quantities_to_report(self, mzml_file):
+        return self.peptideQuant[mzml_file].get_quantities_to_report()
 
     def read_mq(self, row):
         self.rt = float(row['Retention time'])
@@ -243,17 +365,11 @@ class Peptide(object):
             self.clusterWidth += self.specialResidueCount
 
         for isotope in range(self.clusterWidth):
-
-            # TODO
-            # this lists targets as <ISOTOPE> above the ms precursor target
-            # -- is this misleading?
-            # TODO
-
             isotopeCenter = self.mz + float(isotope) * float(options.isotopeWeight) / float(self.z)
             self.targets.append(
                 [
-                    isotopeCenter - options.eicWidth,
-                    isotopeCenter + options.eicWidth
+                    isotopeCenter - isotopeCenter / 1000000 * options.eicWidth,
+                    isotopeCenter + isotopeCenter / 1000000 * options.eicWidth
                 ]
             )
         self.minTargetLL = min([_[0] for _ in self.targets]) - 1
@@ -283,7 +399,7 @@ class InputReader(object):
 
         if options.writeSchema:
             if options.isSpectronaut:
-                self.writeSchemaFromSpectronaut(df)
+                self.writeSchemaFromSpectronaut()
             else:
                 print('INVALID OPTIONS')
             sys.exit()
@@ -306,7 +422,11 @@ class InputReader(object):
         self.schema = pd.read_csv(options.schema)
         return
 
-    def writeSchemaFromSpectronaut(self, df):
+    def writeSchemaFromSpectronaut(self):
+
+        # read spectronaut dataframe
+        df = pd.read_csv(options.spectronaut_file, delimiter='\t')
+
         files = list(set(df['R.FileName'].tolist()))
         of1 = open('fileSchema.tsv','wt')
         of1.write('File,Group\n'%())
@@ -329,62 +449,32 @@ class InputReader(object):
         df = df[df['R.FileName'].isin(control_samples)]
 
         print('Processing peptide targets')
+        counter = 1
         for index, group in df.groupby(['EG.PrecursorId']):
 
             # quick filter
             if len(group) != len(control_samples): continue
             if len(set(group['R.FileName'].tolist())) != len(control_samples): continue
 
-            p = Peptide( group, options, all_samples )
+            p = Peptide( group, options, all_samples, counter)
+
             self.peptides.append(p)
+            counter += 1
 
         print('Found %s peptides' %len(self.peptides))
         return
 
     def find_peaks(self):
-        for p in self.peptides:
+
+        self.peptides.sort(key=lambda x: x.TIC, reverse=True)
+
+        for i, p in enumerate(self.peptides):
+            if (i % 100) == 0:
+                print('Processing peak %s of %s' %(i, len(self.peptides)))
             p.find_peaks()
         return
 
-def gauss(x, amp, cent, wid, scale = 1):
-    return(amp/ (np.sqrt(2*np.pi*(wid/scale)**2 )) * np.exp(-(x-(cent/scale))**2 / (2*(wid/scale)**2)))
-
-def getPeptides(target_protein_ids, options):
-    peptides = []
-
-    df = pd.read_csv(options.modificationSpecificPeptidesFile, delimiter='\t')
-
-    # filter to only identified spectra
-    df = df[df['Reverse'] != '+']
-    df = df[df['Potential contaminant'] != '+']
-
-    print('Processing peptide targets')
-    for index, row in df.iterrows():
-
-        if target_protein_ids:
-            # test if this MSMS spectrum matches a protein in target_protein_ids
-            matches = [_ for _ in target_protein_ids if _ in row['Proteins']]
-            if len(matches) == 0: continue
-
-        for charge in row['Charges'].split(';'):
-            row['Charge'] = charge
-            p = Peptide( row, options )
-            peptides.append(p)
-
-    peptides.sort(key = lambda x: x.TIC, reverse = True)
-
-    if options.processTopN:
-        try:
-            return peptides[0:options.processTopN+1]
-        except IndexError:
-            print('Warning - asked to analyse top %s peptides but only %s were found. Processing all...' %(
-                options.processTopN, len(peptides))
-            )
-
-    return peptides
-
 def extract_isotopologue_EICS(reader, options):
-
 
     '''
     New fitting procedure
@@ -398,7 +488,6 @@ def extract_isotopologue_EICS(reader, options):
 
     '''
 
-
     '''
         1) Extract individual isotopologue EIC traces
     '''
@@ -408,6 +497,7 @@ def extract_isotopologue_EICS(reader, options):
     for mzml_file in reader.peptides[0].all_mzml_files:
 
         print('Processing mzml file %s' %mzml_file)
+
         # check file exists
         if mzml_file not in files_without_extensions:
             print('Warning: mzml file %s not found! Skipping...')
@@ -432,245 +522,110 @@ def extract_isotopologue_EICS(reader, options):
                     mzIndices = np.where((mzs > t[0]) & (mzs < t[1]))
                     eic_intensity = np.sum(ints[mzIndices])
                     p.peptideQuant[mzml_file].append_intensity(isotopei, eic_intensity)
-        break
     return
 
-def getEICData_old(peptides, outPath, options):
+def write_report(reader, options):
 
-    output = 'result.dat'
-
-    print('Found %s peptide targets' %len(peptides))
+    output = options.outFileName
+    try:
+        outPath = os.path.join(os.getcwd(), options.outDirName)
+        os.makedirs(outPath)
+    except:
+        print ('\nOutput directory already exists! Exiting...\n')
 
     of1 = open(os.path.join(outPath, output),'wt')
-    maxClusterWidth = max( [p.clusterWidth for p in peptides] )
+    maxClusterWidth = max( [p.clusterWidth for p in reader.peptides] )
     text = '\t'.join(
-        ['File', 'Sequence', 'Special Residue Count', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup'] + ['Intensity %s' % str(x) for x in range(maxClusterWidth)]
+        ['Peptide ID', 'File', 'Sequence', 'Special Residue Count', 'Formula', 'm/z', 'Retantion Time (min)', 'Charge', 'Modifications', 'Protein Gorup', 'Num Spectra Summed', 'Score'] +
+        ['Intensity %s' % str(x) for x in range(maxClusterWidth)]
     )
     of1.write('%s\n'%(text))
 
-    for mzmlFile in options.mzmlFile:
-        print('Processing %s' %mzmlFile)
+    for mzml_file in reader.peptides[0].all_mzml_files:
+        for p in reader.peptides:
 
-        '''
-        Fitting procedure
-        ------------------------------------------------
+            quantities, num_spectra_summed = p.get_quantities_to_report(mzml_file)
 
-        1) Create a summed EIC for each target ion
-            - ensures that some intensity will exist
-              even for completly labeled peptides
+            score = p.peptideQuant[mzml_file].get_score()
 
-        2) Find index of spectrum at EIC peak maximum
+            to_write = [str(x) for x in [p.peptide_id, mzml_file, p.sequence, p.specialResidueCount, p.formula, p.mz, p.rt, p.z, p.mods, p.proteinGroup, num_spectra_summed, score]]
+            to_write += [str('%.2f' %_) for _ in quantities]
 
-        3) For spectra within avgNSpectra of max,
-            - average abundance values for each isotope
-
-        '''
-
-        # get summed EIC intensity
-        spectra = pymzml.run.Reader(mzmlFile)
-        for s in spectra:
-
-            if s.ms_level != 1: continue
-            time = s.scan_time_in_minutes()
-            mzs = s.mz
-            ints = s.i
-
-            for i, p in enumerate(peptides):
-                if abs(p.rt - time) < options.eicLength:
-
-                    # used for picking EIC peak max
-                    p.appendQuantity(mzmlFile, 'rts', time)
-
-                    summedEIC = 0
-                    for t in p.targets:
-                        mzIndices = np.where((mzs > t[0]) & (mzs < t[1]))
-                        summedEIC += np.sum(ints[mzIndices])
-                    p.appendQuantity(mzmlFile, 'ints', summedEIC)
-
-                    # used later for actual isotope abundance calculation
-
-                    # don't need whole spectrum
-                    mask = np.where( (mzs > p.minTargetLL) & (mzs < p.maxTargetHL) )
-                    mzsubset = mzs[mask]
-                    intsubset = ints[mask]
-
-                    p.appendQuantity(mzmlFile, 'mzs', mzsubset)
-                    p.appendQuantity(mzmlFile, 'mzInts', intsubset)
-
-        # fit gaussians
-        for p in peptides:
-            cen = p.rt
-            wid = max(p.getQuantity(mzmlFile, 'rts')) - min(p.getQuantity(mzmlFile, 'rts'))
-            amp = max(p.getQuantity(mzmlFile, 'ints'))
-            p0 = [amp,cen,wid]
-
-            try:
-                RTpopt, RTpcov= opt.curve_fit(
-                    lambda x, amp, cen, wid: gauss(x, amp, cen, wid, scale = 1),
-                    p.getQuantity(mzmlFile, 'rts'), p.getQuantity(mzmlFile, 'ints'), p0=p0, maxfev = 2000
-                )
-            except RuntimeError:
-                # optimal fit parameters not found
-                continue
-
-            # calcualte full width at half max
-            eicFWHM = 2*np.sqrt(2*np.log(2))*RTpopt[2] / 1
-
-            if options.fwhmLim:
-                if eicFWHM > options.fwhmLim:
-                    continue
-
-            # save fitting parameters
-            p.setQuantity(mzmlFile, 'fits', [RTpopt, RTpcov])
-            p.setQuantity(mzmlFile, 'eicFWHM', eicFWHM)
-
-            # use curve to create fitted gaussian intensities at given rts
-            fit_ints = gauss(
-                p.getQuantity(mzmlFile, 'rts'), *p.getQuantity(mzmlFile, 'fits')[0]
-            )
-
-            # pick and save index of maximal intensity
-            # -- this is used as the center point for the window of spectra to average
-            index = np.argmax(fit_ints)
-            p.setQuantity(mzmlFile, 'maxrt', p.getQuantity(mzmlFile, 'rts')[index])
-            p.setQuantity(mzmlFile, 'maxrtindex', index)
-
-            abundances = []
-            for t in p.targets:
-                abundances.append([])
-                for index, eicRT in enumerate(p.getQuantity(mzmlFile, 'rts')):
-                    if abs(index - p.getQuantity(mzmlFile, 'maxrtindex')) < options.avgNSpectra:
-                        specmzs = p.getQuantity(mzmlFile, 'mzs')[index]
-                        specints = p.getQuantity(mzmlFile, 'mzInts')[index]
-                        mask = np.where(
-                            (specmzs > t[0])
-                            &
-                            (specmzs < t[1])
-                        )
-                        intsubset = specints[mask]
-                        abundances[-1].append(np.sum(intsubset))
-
-            # used only for plotting
-            p.setQuantity(mzmlFile, 'abundances', abundances)
-
-            text = '\t'.join(
-                [str(x) for x in [mzmlFile, p.sequence, p.specialResidueCount, p.formula, p.mz, p.rt, p.z, p.mods, p.proteinGroup]] + [str(sum(x) / len(x)) for x in p.getQuantity(mzmlFile, 'abundances')]
-            )
+            text = '\t'.join(to_write)
             of1.write('%s\n'%(text))
 
     of1.close()
     return
 
-def drawProfilePlots(peptides, outPath, options):
-
-    figDir = 'profile'
-
-    path = os.path.join(outPath, figDir)
-    try:
-        os.makedirs(path)
-    except:
-        pass
-
-    plotxlim = 3
-    vals = []
-    for mzmlFile in options.mzmlFile:
-        for p in peptides:
-            try:
-                v = abs(p.getQuantity(mzmlFile, 'eicFWHM'))
-                if v > plotxlim:
-                    v = plotxlim
-                vals.append(v)
-            except:
-                pass
-
-    fig, ax = plt.subplots()
-
-    ax.hist(vals, density=False, bins=100, range=(0,plotxlim))
-    ax.set_ylabel('Counts')
-    ax.set_xlabel('EIC FWHM');
-
-    fig.tight_layout()
-    fig.savefig( os.path.join(path, 'FWHM_Histogram.png'))
-
-    return
-
-def drawPlots(peptides, outPath, options):
+def drawPlots(reader, options):
 
     figDir = 'figs'
 
+    outPath = os.path.join(os.getcwd(), options.outDirName)
     path = os.path.join(outPath, figDir)
     try:
         os.makedirs(path)
     except:
         pass
 
-    for ip, p in enumerate(peptides):
+    mzmlFiles = reader.peptides[0].all_mzml_files
+
+    for ip, p in enumerate(reader.peptides):
 
         if options.plotTopN and ip > options.plotTopN:
             break
 
-        fig, axs = plt.subplots(len(options.mzmlFile), 2)
+        fig = Figure(figsize=(8, 12), dpi=200)
+        axs = fig.subplots(len(mzmlFiles), 2)
 
-        for axi, mzmlFile in enumerate(options.mzmlFile):
+        for axi, mzmlFile in enumerate(sorted(mzmlFiles)):
 
-            if len(options.mzmlFile) == 1:
+            if len(mzmlFiles) == 1:
                 ax = axs
             else:
                 ax = axs[axi]
 
             name = os.path.basename(mzmlFile)
-            try:
-                f = p.getQuantity(mzmlFile, 'fits')[0]
-            except KeyError:
-                continue
 
             # chromatograms
             ax[0].set_title( name )
             ax[0].set_ylabel('Abundance')
             ax[0].set_xlim((
-                min(p.getQuantity(mzmlFile, 'rts')),
-                max(p.getQuantity(mzmlFile, 'rts'))
+                min(p.peptideQuant[mzmlFile].rts),
+                max(p.peptideQuant[mzmlFile].rts),
             ))
-            ax[0].plot(
-                p.getQuantity(mzmlFile, 'rts'),
-                p.getQuantity(mzmlFile, 'ints')
-            )
 
-            ax[0].plot(
-                p.getQuantity(mzmlFile, 'rts'),
-                gauss(p.getQuantity(mzmlFile, 'rts'), *p.getQuantity(mzmlFile, 'fits')[0])
-            )
+            lbound, rbound = p.peptideQuant[mzmlFile].get_rt_boundaries_for_integrated_peak()
+            for c in range(p.clusterWidth):
+                ax[0].plot(
+                    p.peptideQuant[mzmlFile].rts,
+                    p.peptideQuant[mzmlFile].intDict[c],
+                )
+                if all([lbound, rbound]):
+                    ax[0].axvline(x = lbound, color = 'red', ls = 'dashed', lw = 0.73)
+                    ax[0].axvline(x = rbound, color = 'red', ls = 'dashed', lw = 0.75)
+
             ax[0].set_yticklabels([])
 
-            # plot chromatogram boundary lines
-
-            HWHM = p.getQuantity(mzmlFile, 'eicFWHM')/2
-            lbound = p.getQuantity(mzmlFile, 'maxrt') - HWHM
-            rbound = p.getQuantity(mzmlFile, 'maxrt') + HWHM
-
-            ax[0].axvline(x = lbound, color = 'red', ls = 'dashed', lw = 0.73)
-            ax[0].axvline(x = rbound, color = 'red', ls = 'dashed', lw = 0.75)
-            ax[0].axvline(x = p.rt, color = 'blue', ls = 'dashed', lw = 0.75)
-
             # isotope abundances
-            x = list(range(len(p.getQuantity(mzmlFile, 'abundances'))))
+            quantities = p.peptideQuant[mzmlFile].result
+            x = list(range(len(quantities)))
+
             ax[1].set_title( name )
-            ax[1].bar(
-                x, [sum(x) for x in p.getQuantity(mzmlFile, 'abundances')] , align = 'center' , alpha = 0.5
-            )
+            ax[1].bar( x, quantities , align = 'center' , alpha = 0.5)
 
             ax[1].set_ylabel('Abundance')
             ax[1].set_yticklabels([])
 
-            if axi == len(options.mzmlFile) - 1:
+            if axi == len(mzmlFiles) - 1:
                 ax[0].set_xlabel('Retention Time (min)')
                 ax[1].set_xlabel('Isotope')
+            else:
+                ax[0].set_xticklabels([])
+                ax[1].set_xticklabels([])
 
         fig.tight_layout()
-        plt.savefig( os.path.join(path, '%s_%s_rt_%s_mz_%s.png' %(len(p.sequence), p.sequence, p.rt, p.mz)))
-        plt.clf()
-        plt.cla()
-        plt.close()
+        fig.savefig( os.path.join(path, '%s_%s_rt_%s_mz_%s.png' %(p.peptide_id, p.sequence, p.rt, p.mz)))
     return
 
 def main(options):
@@ -683,27 +638,17 @@ def main(options):
         print ('\nOutput directory already exists! Exiting...\n')
 #        sys.exit()
 
-#    peptides = getPeptides(options)
-    import pickle
-    test = True
-    if not test:
-        peptides = InputReader(options)
-        peptides.getPeptides(options)
-        extract_isotopologue_EICS(peptides, options)
-        pickle.dump(peptides, open('peptides.pickle','wb'))
-    else:
-        peptides = pickle.load(open('peptides.pickle','rb'))
+    peptides = InputReader(options)
+    peptides.getPeptides(options)
+    extract_isotopologue_EICS(peptides, options)
 
     peptides.find_peaks()
-    sys.exit()
+    pickle.dump(peptides, open(os.path.join(outPath, options.outFileName +'.pickle','wb'))
 
-    getEICData(peptides, outPath, options)
-
-    if options.profile:
-        drawProfilePlots(peptides, outPath, options)
+    write_report(peptides, options)
 
     if options.plot:
-        drawPlots(peptides, outPath, options)
+        drawPlots(peptides, options)
 
     return
 
