@@ -10,7 +10,7 @@ from matplotlib.figure import Figure
 
 DEFAULT_MIN_CLUSTER_WIDTH = 5
 DEFAULT_EXTRACTION_WIDTH = 10
-DEFAULT_EXTRACTION_LENGTH = 1
+DEFAULT_EXTRACTION_LENGTH = 1.5
 DEFAULT_ISOTOPE_WEIGHT = 1
 DEFAULT_SPECTRA_TO_AVERAGE = 2
 DEFAULT_OUT_DIR_NAME = 'results'
@@ -643,7 +643,7 @@ def main(options):
     extract_isotopologue_EICS(peptides, options)
 
     peptides.find_peaks()
-    pickle.dump(peptides, open(os.path.join(outPath, options.outFileName + '.pickle','wb')))
+#    pickle.dump(peptides, open(os.path.join(outPath, options.outFileName + '.pickle','rb')))
 
     write_report(peptides, options)
 
