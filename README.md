@@ -252,5 +252,5 @@ Subsequently the calculation can be simply done by:
 
 	Final_table <- cbind(Ks, Correction_LPF)
 	
-The synthesis rates are the bound at the beggining of the corrected LPF table and ready to export.
+The synthesis rates are the bound at then beggining of the corrected LPF table and ready to export.
 
