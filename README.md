@@ -1,6 +1,6 @@
 # isotopeEnrichment
 
-The isotopeEnrichment.py script determines the abundances of infividual peptide isotopes in liquid chraomatography-mass spectrometry data. The resulting data can be used to determine the extent of heavy isotope incorporation into a target molecule in isotope tracer experiments.
+The isotopeEnrichment.py script determines the abundances of individual peptide isotopes in liquid chraomatography-mass spectrometry data. The resulting data can be used to determine the extent of heavy isotope incorporation into a target molecule in isotope tracer experiments.
 
 **Workflow**
 
@@ -26,11 +26,11 @@ The isotopeEnrichment.py script depends on the following python libraries:
 
 # How it works
 
-isotopeEnrichment.py uses peptide assignment data from the msmsScans.txt file produced by MaxQuant to calculate the exact mass of theoretical isotopologues that could be expected if the peptide were to be enriched with an arbitrary number of 'heavy' labelled atoms. For each peptide, theoretical exact mases are then used to create an extracted ion chromatogram that is a summation of the intensities of each of the target isotopologues.
+isotopeEnrichment.py uses peptide assignment data from the msmsScans.txt file produced by MaxQuant to calculate the exact mass of theoretical isotopologs that could be expected if the peptide were to be enriched with an arbitrary number of 'heavy' labelled atoms. For each peptide, theoretical exact mases are then used to create an extracted ion chromatogram that is a summation of the intensities of each of the target isotopologs.
 
-A gaussian curve is then fitted to this chromatogram and the target isotopologue intensities are taken as the average of the observed intensities in a given number of mass spectra either side of the gaussian peak maxima.
+A gaussian curve is then fitted to this chromatogram and the target isotopolog intensities are taken as the average of the observed intensities in a given number of mass spectra either side of the gaussian peak maxima.
 
-If a peptide is fully labelled (i.e. 100% isotope incorporation), the entire isotope distribution will be shifted to higher m/z which will likely impair assignment by MaxQuant. To account for this case, we only conduct maxquant searches on the 'control' samples that have not been treated with an isotopic label. The observed retention time and theoretical exact target mass data from peptides assigned by MaxQuant in the control sample are then used to identify the likely corresponding peptide in the isotope-treated samples. While the Gaussian fitting procedure provides some tolerance for drifts in retention time, chromatographic reproducibility in this analysis is of great importance.
+If a peptide is fully labelled (i.e., 100% isotope incorporation), the entire isotope distribution will be shifted to higher m/z which will likely impair assignment by MaxQuant. To account for this case, we only conduct maxquant searches on the 'control' samples that have not been treated with an isotopic label. The observed retention time and theoretical exact target mass data from peptides assigned by MaxQuant in the control sample are then used to identify the likely corresponding peptide in the isotope-treated samples. While the Gaussian fitting procedure provides some tolerance for drifts in retention time, chromatographic reproducibility in this analysis is of great importance.
 
 In some cases, Gaussian curve fitting may be complicated by the presence of multiple peaks in the extracted window or by low abundance or absent peaks. To ensure that these do not lead to inaccurate or unexpected results, limits can be set on the tolerated range of peak full-width-half-maxima (FWHM). Peaks with FWHMs outside this range will be excluded.
 
@@ -52,6 +52,7 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
 
     python isotopeEnrichment.py --mzmlFile MS_data_file.mzML --proteinGroupsFile proteinGroups.txt --msmsScansFile msmsScans.txt --searchTerm 60S --plot
 
+![IsoEnvelope](images/IsoEnvelope.png)
 
 
 # isotopeEnrichment help
@@ -122,8 +123,6 @@ The isotopeEnrichment.R function arranges peptides into the required input files
 
 This function allows users to grab the output "intensities.tsv" table from isotopeEnrichment.py and transform it into the correct input format for IsoCorrectoR while selecting and optimal number of isotopolog peaks per peptide entry. Optimization of the isotopolog number relies on estimating first how many isotopologs can be expected from the atomic composition of each peptide and their natural isotopic abundance and secondly from the labelling percentage in soluble amino acid pools and the number of labelled amino acid residues in each peptide sequence.
 
-
-
     ## preparing results files for correction
 
     IsEnr <- isotopeEnrichment(PyResultsDir = "intensities.tsv",
@@ -159,7 +158,6 @@ This function allows users to grab the output "intensities.tsv" table from isoto
 The statistical filters applied in this section are meant to remove falsely interpreted isotopolog abundances derived from "labelled" controls, this phenomenon can result from peptide coelution and contamination if the heavy isotopolog peaks with different peptides. This in turn results in an increased relative isotope abundance that does not come from the labelling experiment. This special scenario exemplifies the utility of having non-labelled controls in your samples. This function allows users to apply thresholds on residual labelling, noise and multiple parameters that leverage on the quality of the information that is delivered. The function returns a list of peptide subsets that fit the selected criteria and may be fed as input to the subsequent function in order to annotate their parent protein identities in the experimental dataset.
 
 The filters are a dependendency of the R package [RandoDiStats](https://github.com/MSeidelFed/RandodiStats_package) and their usage and documentation can be found in the provided link.
-
 
     ## data reduction based on class comparison algorithms
     
