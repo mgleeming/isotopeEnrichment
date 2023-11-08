@@ -52,7 +52,7 @@ A series of figures can be produced that show the EIC trace for the monoisotope 
 
     python isotopeEnrichment.py --mzmlFile MS_data_file.mzML --proteinGroupsFile proteinGroups.txt --msmsScansFile msmsScans.txt --searchTerm 60S --plot
 
-![IsoEnvelope](images/IsoEnvelope.png)
+![IsoEnvelope](images/IsotopicEnvelope.png)
 
 # isotopeEnrichment help
     usage: isotopeEnrichment.py [-h] [--searchTerm SEARCHTERM] --mzmlFile MZMLFILE
